@@ -8,3 +8,4 @@ build
 /app/*.json
 /app/keystore.jks
 /app/src/main/res/values/config.xml
+/firebase/functions/node_modules/
