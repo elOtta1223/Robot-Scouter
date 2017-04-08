@@ -124,16 +124,11 @@ public final class TbaApi implements Callable<Team> {
         }
     }
 
-    private void setAndCacheMedia(final String url) {
+    private void setAndCacheMedia(String url) {
         mTeam.setMedia(url);
-        new Handler(mContext.getMainLooper()).post(new Runnable() {
-            @Override
-            public void run() {
-                Glide.with(mContext)
-                        .load(url)
-                        .diskCacheStrategy(DiskCacheStrategy.SOURCE)
-                        .preload();
-            }
-        });
+        new Handler(mContext.getMainLooper()).post(() -> Glide.with(mContext)
+                .load(url)
+                .diskCacheStrategy(DiskCacheStrategy.SOURCE)
+                .preload());
     }
 }

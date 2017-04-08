@@ -6,36 +6,38 @@ import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.Query;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
 public class FirebaseCopier extends FirebaseTransformer {
-    private List<Task<Void>> mWriteTasks = new ArrayList<>();
-
-    public FirebaseCopier(Query to) {
-        super(to);
+    public FirebaseCopier(Query from, DatabaseReference to) {
+        super(from, to);
     }
 
-    public FirebaseCopier(Query from, Query to) {
-        super(from, to);
+    public static Task<Void> copyTo(DataSnapshot copySnapshot, DatabaseReference to) {
+        Map<String, Object> values = new HashMap<>();
+        deepCopy(values, copySnapshot);
+        return to.updateChildren(values);
+    }
+
+    private static void deepCopy(Map<String, Object> values, DataSnapshot from) {
+        Iterable<DataSnapshot> children = from.getChildren();
+        if (children.iterator().hasNext()) {
+            for (DataSnapshot snapshot : children) {
+                Map<String, Object> data = new HashMap<>();
+                data.put(".priority", snapshot.getPriority());
+                values.put(snapshot.getKey(), data);
+
+                deepCopy(data, snapshot);
+            }
+        } else {
+            values.put(".value", from.getValue());
+        }
     }
 
     @Override
     public Task<Void> transform(DataSnapshot copySnapshot) {
-        DatabaseReference to = mToQuery.getRef().child(copySnapshot.getKey());
-        to.setValue(copySnapshot.getValue(), copySnapshot.getPriority());
-        deepCopy(copySnapshot, to);
-        return Tasks.whenAll(mWriteTasks);
-    }
-
-    private void deepCopy(DataSnapshot from, DatabaseReference to) {
-        Iterable<DataSnapshot> children = from.getChildren();
-        if (children.iterator().hasNext()) {
-            for (DataSnapshot snapshot : children) {
-                deepCopy(snapshot, to.child(snapshot.getKey()));
-            }
-        } else {
-            mWriteTasks.add(to.setValue(from.getValue(), from.getPriority()));
-        }
+        if (copySnapshot.getValue() == null) return Tasks.forResult(null);
+        else return copyTo(copySnapshot, getToRef());
     }
 }

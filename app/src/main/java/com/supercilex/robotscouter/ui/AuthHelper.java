@@ -13,7 +13,6 @@ import com.firebase.ui.auth.AuthUI;
 import com.firebase.ui.auth.ErrorCodes;
 import com.firebase.ui.auth.IdpResponse;
 import com.firebase.ui.auth.ResultCodes;
-import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.android.gms.tasks.Task;
 import com.google.android.gms.tasks.TaskCompletionSource;
@@ -28,6 +27,7 @@ import com.google.firebase.database.ValueEventListener;
 import com.google.firebase.remoteconfig.FirebaseRemoteConfig;
 import com.supercilex.robotscouter.R;
 import com.supercilex.robotscouter.data.model.User;
+import com.supercilex.robotscouter.data.util.UserHelper;
 import com.supercilex.robotscouter.ui.teamlist.IntentReceiver;
 import com.supercilex.robotscouter.util.AnalyticsHelper;
 import com.supercilex.robotscouter.util.Constants;
@@ -88,21 +88,11 @@ public final class AuthHelper implements View.OnClickListener {
 
     private static Task<AuthResult> signInAnonymouslyInitBasic() {
         return FirebaseAuth.getInstance().signInAnonymously()
-                .addOnSuccessListener(new OnSuccessListener<AuthResult>() {
-                    @Override
-                    public void onSuccess(AuthResult result) {
-                        AnalyticsHelper.updateUserId();
-                    }
-                });
+                .addOnSuccessListener(result -> AnalyticsHelper.updateUserId());
     }
 
     private static Task<AuthResult> signInAnonymouslyDbInit() {
-        return signInAnonymouslyInitBasic().addOnSuccessListener(new OnSuccessListener<AuthResult>() {
-            @Override
-            public void onSuccess(AuthResult result) {
-                DatabaseInitializer.init();
-            }
-        });
+        return signInAnonymouslyInitBasic().addOnSuccessListener(result -> DatabaseInitializer.init());
     }
 
     public void initMenu(Menu menu) {
@@ -131,40 +121,23 @@ public final class AuthHelper implements View.OnClickListener {
 
     private void signInAnonymously() {
         signInAnonymouslyDbInit()
-                .addOnSuccessListener(mActivity, new OnSuccessListener<AuthResult>() {
-                    @Override
-                    public void onSuccess(AuthResult result) {
-                        initDeepLinkReceiver();
-                    }
-                })
-                .addOnFailureListener(mActivity, new OnFailureListener() {
-                    @Override
-                    public void onFailure(@NonNull Exception e) {
+                .addOnSuccessListener(mActivity, result -> initDeepLinkReceiver())
+                .addOnFailureListener(mActivity, e ->
                         Snackbar.make(mActivity.findViewById(R.id.root),
                                       R.string.anonymous_sign_in_failed,
                                       Snackbar.LENGTH_LONG)
-                                .setAction(R.string.sign_in, AuthHelper.this)
-                                .show();
-                    }
-                });
+                                .setAction(R.string.sign_in, this)
+                                .show());
     }
 
     public void signOut() {
         AuthUI.getInstance()
                 .signOut(mActivity)
-                .addOnSuccessListener(new OnSuccessListener<Void>() {
-                    @Override
-                    public void onSuccess(Void aVoid) {
-                        signInAnonymouslyInitBasic();
-                        FirebaseAppIndex.getInstance().removeAll();
-                    }
+                .addOnSuccessListener(aVoid -> {
+                    signInAnonymouslyInitBasic();
+                    FirebaseAppIndex.getInstance().removeAll();
                 })
-                .addOnSuccessListener(mActivity, new OnSuccessListener<Void>() {
-                    @Override
-                    public void onSuccess(Void aVoid) {
-                        toggleMenuSignIn(false);
-                    }
-                });
+                .addOnSuccessListener(mActivity, aVoid -> toggleMenuSignIn(false));
     }
 
     public void showSignInResolution() {
@@ -188,13 +161,14 @@ public final class AuthHelper implements View.OnClickListener {
 
                 initDeepLinkReceiver();
 
-                User user = new User.Builder(getUid())
+                UserHelper userHelper = new User.Builder(getUid())
                         .setEmail(getUser().getEmail())
                         .setName(getUser().getDisplayName())
                         .setPhotoUrl(getUser().getPhotoUrl())
-                        .build();
-                user.add();
-                if (response != null) user.transferData(response.getPrevUid());
+                        .build()
+                        .getHelper();
+                userHelper.add();
+                if (response != null) userHelper.transferData(response.getPrevUid());
 
                 AnalyticsHelper.login();
             } else {

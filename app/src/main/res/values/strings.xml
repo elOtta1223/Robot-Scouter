@@ -28,15 +28,25 @@
     <string name="share_title">Share team %s</string>
     <string name="share_message">Edit team %s with me!</string>
     <string name="share_call_to_action">Import team %s into Robot Scouter</string>
+
+    <!-- Spreadsheet exporting -->
     <string name="export_spreadsheet">Export to spreadsheet</string>
     <plurals name="share_spreadsheet_title">
-        <item quantity="one">Export team %s and its scouting data to a spreadsheet</item>
-        <item quantity="other">Export teams %s and their scouting data to a spreadsheet</item>
+        <item quantity="one">Share team %s’s scouting data</item>
+        <item quantity="other">Share teams %s’s scouting data</item>
     </plurals>
     <string name="write_storage_rationale">Robot Scouter needs access to your storage to create the XLSX file.</string>
-    <string name="loading_teams">Loading teams… (This may take several minutes)</string>
-    <string name="exporting_spreadsheet">Exporting spreadsheet…</string>
-    <string name="exporting_offline">Exporting spreadsheet while offline will yield incomplete results.</string>
+    <string name="never_again">Never show again</string>
+    <string name="exporting_spreadsheet_hint">Export started; view progress in the notification drawer.</string>
+    <plurals name="exporting_spreadsheet_complete_title">
+        <item quantity="one">Spreadsheet exporting complete for team %s</item>
+        <item quantity="other">Spreadsheet exporting complete for teams %s</item>
+    </plurals>
+    <string name="exporting_spreadsheet_title">Exporting spreadsheet</string>
+    <string name="exporting_spreadsheet_loading">Loading teams</string>
+    <string name="exporting_spreadsheet_team">Exporting team %s’s sheet</string>
+    <string name="exporting_spreadsheet_average">Exporting average sheet</string>
+    <string name="exporting_offline">Exporting spreadsheet while offline may yield incomplete results.</string>
 
     <string name="sign_in">Sign in</string>
     <string name="sign_out">Sign out</string>
@@ -66,6 +76,10 @@
     <string name="developed_with_love">Robot Scouter is developed with love by <a href="https://github.com/SUPERCILEX">Alex Saveau</a> and the icon was designed by <a href="https://github.com/andrewda">Andrew Dassonville</a>.\n\nIf you want to try out new features before everyone else, feel free to join <a href="https://play.google.com/apps/testing/com.supercilex.robotscouter">the beta</a>.\n\nAlso, Robot Scouter is <a href="https://github.com/SUPERCILEX/Robot-Scouter">open-source</a> so please <a href="https://github.com/SUPERCILEX/Robot-Scouter/issues/new">file bugs and feature requests</a>!</string>
 
     <string name="teams_imported">Teams successfully imported</string>
+
+    <string name="update">Update</string>
+    <string name="update_required_title">Update Robot Scouter</string>
+    <string name="update_required_message">An update is required for Robot Scouter to work correctly.</string>
 
     <!-- Scout Activity -->
     <string name="title_activity_scout">Scout</string>
@@ -119,7 +133,7 @@
     <string name="stop_stopwatch">Stop (%s)</string>
     <string name="cycle_item">Cycle %d</string>
     <string name="average">Average</string>
-    <string name="unsupported_device">You are using an unsupported device</string>
+    <string name="unsupported_device">WARNING: you are using an unsupported device</string>
 
     <!-- Accessibility -->
     <string name="accessibility_robot_icon">A picture of the team\'s robot.</string>

@@ -9,14 +9,12 @@ import android.os.Parcelable;
 import android.support.annotation.NonNull;
 import android.text.TextUtils;
 
-import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.firebase.appindexing.Action;
 import com.google.firebase.appindexing.FirebaseAppIndex;
 import com.google.firebase.appindexing.FirebaseUserActions;
 import com.google.firebase.appindexing.Indexable;
 import com.google.firebase.appindexing.builders.DigitalDocumentBuilder;
 import com.google.firebase.appindexing.builders.Indexables;
-import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.remoteconfig.FirebaseRemoteConfig;
 import com.supercilex.robotscouter.data.client.DownloadTeamDataJob;
@@ -27,13 +25,15 @@ import com.supercilex.robotscouter.util.Constants;
 import com.supercilex.robotscouter.util.CustomTabsHelper;
 import com.supercilex.robotscouter.util.RemoteConfigHelper;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 public class TeamHelper implements Parcelable, Comparable<TeamHelper> {
     public static final Parcelable.Creator<TeamHelper> CREATOR = new Parcelable.Creator<TeamHelper>() {
         @Override
         public TeamHelper createFromParcel(Parcel source) {
-            return new TeamHelper((Team) source.readParcelable(Team.class.getClassLoader()));
+            return new TeamHelper(source.readParcelable(Team.class.getClassLoader()));
         }
 
         @Override
@@ -42,7 +42,8 @@ public class TeamHelper implements Parcelable, Comparable<TeamHelper> {
         }
     };
 
-    private static final String INTENT_TEAM = "com.supercilex.robotscouter.Team";
+    private static final String TEAM_HELPER_KEY = "com.supercilex.robotscouter.data.util.TeamHelper";
+    private static final String TEAM_HELPERS_KEY = "com.supercilex.robotscouter.data.util.TeamHelpers";
     private static final String FRESHNESS_DAYS = "team_freshness";
 
     private final Team mTeam;
@@ -56,21 +57,38 @@ public class TeamHelper implements Parcelable, Comparable<TeamHelper> {
     }
 
     public static TeamHelper get(Intent intent) {
-        return (TeamHelper) intent.getParcelableExtra(INTENT_TEAM);
+        return intent.getParcelableExtra(TEAM_HELPER_KEY);
     }
 
+    public static TeamHelper get(Bundle args) {
+        return args.getParcelable(TEAM_HELPER_KEY);
+    }
 
-    public static TeamHelper get(Bundle arguments) {
-        return (TeamHelper) arguments.getParcelable(INTENT_TEAM);
+    public static List<TeamHelper> getList(Intent intent) {
+        return intent.getParcelableArrayListExtra(TEAM_HELPERS_KEY);
+    }
+
+    public static List<TeamHelper> getList(Bundle args) {
+        return args.getParcelableArrayList(TEAM_HELPERS_KEY);
+    }
+
+    public static Intent toIntent(List<TeamHelper> teamHelpers) {
+        return new Intent().putExtra(TEAM_HELPERS_KEY, new ArrayList<>(teamHelpers));
+    }
+
+    public static Bundle toBundle(List<TeamHelper> teamHelpers) {
+        Bundle args = new Bundle();
+        args.putParcelableArrayList(TEAM_HELPERS_KEY, new ArrayList<>(teamHelpers));
+        return args;
     }
 
     public Intent toIntent() {
-        return new Intent().putExtra(INTENT_TEAM, this);
+        return new Intent().putExtra(TEAM_HELPER_KEY, this);
     }
 
     public Bundle toBundle() {
         Bundle args = new Bundle();
-        args.putParcelable(INTENT_TEAM, this);
+        args.putParcelable(TEAM_HELPER_KEY, this);
         return args;
     }
 
@@ -82,16 +100,18 @@ public class TeamHelper implements Parcelable, Comparable<TeamHelper> {
         return mTeam;
     }
 
-    public void addTeam(Context context) {
+    public void addTeam() {
         DatabaseReference index = getIndicesRef().push();
         mTeam.setKey(index.getKey());
         Long number = mTeam.getNumberAsLong();
         index.setValue(number, number);
-        mTeam.setTemplateKey(context.getSharedPreferences(Constants.SCOUT_TEMPLATE,
-                                                          Context.MODE_PRIVATE)
-                                     .getString(Constants.SCOUT_TEMPLATE, null));
+
+        if (!Constants.sFirebaseScoutTemplates.isEmpty()) {
+            mTeam.setTemplateKey(Constants.sFirebaseScoutTemplates.get(0).getKey());
+        }
         forceUpdateTeam();
         getRef().child(Constants.FIREBASE_TIMESTAMP).removeValue();
+
         FirebaseUserActions.getInstance()
                 .end(new Action.Builder(Action.Builder.ADD_ACTION)
                              .setObject(toString(), getDeepLink())
@@ -128,47 +148,29 @@ public class TeamHelper implements Parcelable, Comparable<TeamHelper> {
         }
     }
 
-    public void updateTemplateKey(String key, Context context) {
+    public void updateTemplateKey(String key) {
         mTeam.setTemplateKey(key);
         getRef().child(Constants.FIREBASE_TEMPLATE_KEY).setValue(mTeam.getTemplateKey());
-        context.getSharedPreferences(Constants.SCOUT_TEMPLATE, Context.MODE_PRIVATE)
-                .edit()
-                .putString(Constants.SCOUT_TEMPLATE, key)
-                .apply();
-
-        for (DataSnapshot snapshot : Constants.sFirebaseTeams) {
-            DataSnapshot templateSnapshot = snapshot.child(Constants.FIREBASE_TEMPLATE_KEY);
-            if (templateSnapshot.getValue() == null) {
-                templateSnapshot.getRef().setValue(key);
-            }
-        }
     }
 
     public void deleteTeam() {
-        ScoutUtils.deleteAll(mTeam.getKey()).addOnSuccessListener(new OnSuccessListener<Void>() {
-            @Override
-            public void onSuccess(Void aVoid) {
-                getRef().removeValue();
-                getIndicesRef().child(mTeam.getKey()).removeValue();
-                FirebaseAppIndex.getInstance().remove(getDeepLink());
-            }
+        ScoutUtils.deleteAll(mTeam.getKey()).addOnSuccessListener(aVoid -> {
+            getRef().removeValue();
+            getIndicesRef().child(mTeam.getKey()).removeValue();
+            FirebaseAppIndex.getInstance().remove(getDeepLink());
         });
     }
 
     public void fetchLatestData(Context context) {
-        final Context appContext = context.getApplicationContext();
+        Context appContext = context.getApplicationContext();
         RemoteConfigHelper.fetchAndActivate()
-                .addOnSuccessListener(new OnSuccessListener<Void>() {
-                    @Override
-                    public void onSuccess(Void aVoid) {
-                        long differenceDays =
-                                TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis() - mTeam.getTimestamp());
-                        double freshness =
-                                FirebaseRemoteConfig.getInstance().getDouble(FRESHNESS_DAYS);
+                .addOnSuccessListener(aVoid -> {
+                    long differenceDays =
+                            TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis() - mTeam.getTimestamp());
+                    double freshness = FirebaseRemoteConfig.getInstance().getDouble(FRESHNESS_DAYS);
 
-                        if (differenceDays >= freshness) {
-                            DownloadTeamDataJob.start(appContext, TeamHelper.this);
-                        }
+                    if (differenceDays >= freshness) {
+                        DownloadTeamDataJob.start(appContext, this);
                     }
                 });
     }

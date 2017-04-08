@@ -1,4 +1,4 @@
-# Robot Scouter — FIRST Robot Scouting made simple and collaborative [![Build Status](https://travis-ci.org/SUPERCILEX/Robot-Scouter.svg?branch=master)](https://travis-ci.org/SUPERCILEX/Robot-Scouter)
+# Robot Scouter — FIRST Robot Scouting made simple and collaborative [![Build Status](https://img.shields.io/travis/SUPERCILEX/Robot-Scouter/master.svg?style=flat-square)](https://travis-ci.org/SUPERCILEX/Robot-Scouter)
 
 <a href='https://play.google.com/store/apps/details?id=com.supercilex.robotscouter&utm_source=https://github.com/SUPERCILEX/Robot-Scouter/'>
     <img alt='Get it on Google Play' src='https://play.google.com/intl/en_us/badges/images/generic/en_badge_web_generic.png' width="270" height="100"/>
@@ -11,6 +11,7 @@ scouting simple and collaborative.
 
 ## Features:
 
+  - Full offline support
   - No setup required
   - Easy sharing between users
   - Seamless collaboration: multiple people can scout the same team, different teams, or go solo on
@@ -38,7 +39,7 @@ the [contribution guidelines](CONTRIBUTING.md) before getting in too deep.
 
 ## Environment setup
 
-1. [Move the dummy files](setup.sh#L7) into position
+1. [Move the dummy files](setup.sh#L11-L14) into position
 1. If you are working with the database or need access to other Firebase technologies,
 [create your own Firebase project](https://firebase.google.com/docs/android/setup#manually_add_firebase)
 and replace the dummy [google-services.json](travis-dummies/google-services.json)

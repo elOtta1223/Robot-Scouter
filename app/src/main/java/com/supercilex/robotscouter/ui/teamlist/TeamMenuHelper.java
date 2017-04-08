@@ -7,7 +7,6 @@ import android.os.Bundle;
 import android.os.Parcelable;
 import android.support.annotation.ColorRes;
 import android.support.annotation.NonNull;
-import android.support.annotation.RequiresApi;
 import android.support.design.widget.FloatingActionButton;
 import android.support.design.widget.Snackbar;
 import android.support.v4.app.Fragment;
@@ -23,6 +22,7 @@ import android.view.View;
 
 import com.firebase.ui.database.FirebaseRecyclerAdapter;
 import com.supercilex.robotscouter.R;
+import com.supercilex.robotscouter.data.client.SpreadsheetExporter;
 import com.supercilex.robotscouter.data.model.Team;
 import com.supercilex.robotscouter.data.util.TeamHelper;
 import com.supercilex.robotscouter.ui.AuthHelper;
@@ -37,9 +37,10 @@ import java.util.List;
 import pub.devrel.easypermissions.AppSettingsDialog;
 import pub.devrel.easypermissions.EasyPermissions;
 
+import static com.supercilex.robotscouter.data.client.SpreadsheetExporter.PERMS;
+
 public class TeamMenuHelper implements TeamMenuManager, EasyPermissions.PermissionCallbacks {
     private static final String SELECTED_TEAMS_KEY = "selected_teams_key";
-    private static final int SELECT_ALL_THRESHOLD = 3;
     private static final int ANIMATION_DURATION = 250;
 
     /**
@@ -218,20 +219,17 @@ public class TeamMenuHelper implements TeamMenuManager, EasyPermissions.Permissi
                 hideTeamSpecificMenuItems();
             }
 
-            if (newSize > oldSize && newSize >= SELECT_ALL_THRESHOLD && mAdapter.getItemCount() > newSize) {
+            if (newSize > oldSize && newSize > Constants.SINGLE_ITEM && mAdapter.getItemCount() > newSize) {
                 Snackbar.make(mFragment.getView(),
                               R.string.multiple_teams_selected,
                               Snackbar.LENGTH_LONG)
-                        .setAction(R.string.select_all, new View.OnClickListener() {
-                            @Override
-                            public void onClick(View v) {
-                                mSelectedTeams.clear();
-                                for (int i = 0; i < mAdapter.getItemCount(); i++) {
-                                    mSelectedTeams.add(mAdapter.getItem(i).getHelper());
-                                }
-                                updateState();
-                                notifyItemsChanged();
+                        .setAction(R.string.select_all, v -> {
+                            mSelectedTeams.clear();
+                            for (int i = 0; i < mAdapter.getItemCount(); i++) {
+                                mSelectedTeams.add(mAdapter.getItem(i).getHelper());
                             }
+                            updateState();
+                            notifyItemsChanged();
                         })
                         .show();
             }
@@ -308,23 +306,18 @@ public class TeamMenuHelper implements TeamMenuManager, EasyPermissions.Permissi
     }
 
     private void updateToolbarColor(boolean visible) {
-        final FragmentActivity activity = mFragment.getActivity();
+        FragmentActivity activity = mFragment.getActivity();
 
         @ColorRes int oldColorPrimary = visible ? R.color.selected_toolbar : R.color.colorPrimary;
         @ColorRes int newColorPrimary = visible ? R.color.colorPrimary : R.color.selected_toolbar;
 
-        final Toolbar toolbar = (Toolbar) activity.findViewById(R.id.toolbar);
+        Toolbar toolbar = (Toolbar) activity.findViewById(R.id.toolbar);
         ValueAnimator toolbarAnimator = ValueAnimator.ofObject(
                 new ArgbEvaluator(),
                 ContextCompat.getColor(mFragment.getContext(), oldColorPrimary),
                 ContextCompat.getColor(mFragment.getContext(), newColorPrimary));
         toolbarAnimator.setDuration(ANIMATION_DURATION);
-        toolbarAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
-            @Override
-            public void onAnimationUpdate(ValueAnimator animator) {
-                toolbar.setBackgroundColor((int) animator.getAnimatedValue());
-            }
-        });
+        toolbarAnimator.addUpdateListener(animator -> toolbar.setBackgroundColor((int) animator.getAnimatedValue()));
         toolbarAnimator.start();
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -336,13 +329,8 @@ public class TeamMenuHelper implements TeamMenuManager, EasyPermissions.Permissi
                     ContextCompat.getColor(mFragment.getContext(), oldColorPrimaryDark),
                     ContextCompat.getColor(mFragment.getContext(), newColorPrimaryDark));
             statusBarAnimator.setDuration(ANIMATION_DURATION);
-            statusBarAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
-                @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
-                @Override
-                public void onAnimationUpdate(ValueAnimator animator) {
-                    activity.getWindow().setStatusBarColor((int) animator.getAnimatedValue());
-                }
-            });
+            statusBarAnimator.addUpdateListener(animator -> activity.getWindow()
+                    .setStatusBarColor((int) animator.getAnimatedValue()));
             statusBarAnimator.start();
         }
     }
@@ -359,17 +347,12 @@ public class TeamMenuHelper implements TeamMenuManager, EasyPermissions.Permissi
     }
 
     private void notifyItemsChanged() {
-        final SimpleItemAnimator animator = (SimpleItemAnimator) mRecyclerView.getItemAnimator();
+        SimpleItemAnimator animator = (SimpleItemAnimator) mRecyclerView.getItemAnimator();
 
         animator.setSupportsChangeAnimations(false);
         mAdapter.notifyItemRangeChanged(0, mAdapter.getItemCount() + 1);
 
-        mRecyclerView.post(new Runnable() {
-            @Override
-            public void run() {
-                animator.setSupportsChangeAnimations(true);
-            }
-        });
+        mRecyclerView.post(() -> animator.setSupportsChangeAnimations(true));
     }
 
     private FloatingActionButton getFab() {
@@ -401,12 +384,12 @@ public class TeamMenuHelper implements TeamMenuManager, EasyPermissions.Permissi
     public void onActivityResult(int requestCode) {
         if (requestCode == AppSettingsDialog.DEFAULT_SETTINGS_REQ_CODE
                 && EasyPermissions.hasPermissions(mFragment.getContext(),
-                                                  SpreadsheetWriter.PERMS)) {
+                                                  PERMS.toArray(new String[PERMS.size()]))) {
             exportTeams();
         }
     }
 
     private void exportTeams() {
-        if (SpreadsheetWriter.writeAndShareTeams(mFragment, mSelectedTeams)) resetMenu();
+        if (SpreadsheetExporter.writeAndShareTeams(mFragment, mSelectedTeams)) resetMenu();
     }
 }

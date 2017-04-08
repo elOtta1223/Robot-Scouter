@@ -9,10 +9,8 @@ import com.firebase.ui.database.FirebaseArray;
 import com.firebase.ui.database.FirebaseIndexArray;
 import com.firebase.ui.database.ObservableSnapshotArray;
 import com.firebase.ui.database.SnapshotParser;
-import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.android.gms.tasks.Task;
 import com.google.android.gms.tasks.TaskCompletionSource;
-import com.google.android.gms.tasks.Tasks;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.crash.FirebaseCrash;
@@ -22,10 +20,12 @@ import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.Query;
 import com.google.firebase.database.ValueEventListener;
+import com.supercilex.robotscouter.data.model.Scout;
 import com.supercilex.robotscouter.data.model.Team;
 import com.supercilex.robotscouter.data.util.FirebaseCopier;
 import com.supercilex.robotscouter.data.util.ScoutUtils;
 import com.supercilex.robotscouter.data.util.TeamHelper;
+import com.supercilex.robotscouter.data.util.UserHelper;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -33,24 +33,27 @@ import java.util.Collections;
 import java.util.List;
 
 public final class DatabaseHelper {
-    private static final SnapshotParser<Team> TEAM_PARSER = new SnapshotParser<Team>() {
-        @Override
-        public Team parseSnapshot(DataSnapshot snapshot) {
-            Team team = snapshot.getValue(Team.class);
-            team.setKey(snapshot.getKey());
-            return team;
-        }
-    };
-
     private static final String QUERY_KEY = "query_key";
 
-    private static final ObservableSnapshotArray<Team> NOOP_ARRAY =
-            new ObservableSnapshotArray<Team>(Team.class) {
-                @Override
-                protected List<DataSnapshot> getSnapshots() {
-                    return new ArrayList<>();
-                }
-            };
+    private static final SnapshotParser<Team> TEAM_PARSER = snapshot -> {
+        Team team = snapshot.getValue(Team.class);
+        team.setKey(snapshot.getKey());
+        return team;
+    };
+    private static final SnapshotParser<Scout> SCOUT_PARSER = snapshot -> {
+        Scout scout = new Scout(snapshot.child(Constants.FIREBASE_NAME).getValue(String.class));
+
+        for (DataSnapshot metric : snapshot.child(Constants.FIREBASE_METRICS).getChildren()) {
+            scout.add(ScoutUtils.METRIC_PARSER.parseSnapshot(metric));
+        }
+
+        return scout;
+    };
+
+    private static final ObservableSnapshotArray<Team> TEAM_NOOP_ARRAY =
+            new NoopArrayBase<>(Team.class);
+    private static final ObservableSnapshotArray<Scout> SCOUT_TEMPLATES_NOOP_ARRAY =
+            new NoopArrayBase<>(Scout.class);
 
     private DatabaseHelper() {
         throw new AssertionError("No instance for you!");
@@ -102,62 +105,29 @@ public final class DatabaseHelper {
         return updateTask.getTask();
     }
 
-    public static void init(final Context appContext) {
-        Constants.sFirebaseTeams = NOOP_ARRAY;
+    public static void init(Context appContext) {
+        Constants.sFirebaseTeams = TEAM_NOOP_ARRAY;
+        Constants.sFirebaseScoutTemplates = SCOUT_TEMPLATES_NOOP_ARRAY;
 
-        FirebaseAuth.getInstance().addAuthStateListener(new FirebaseAuth.AuthStateListener() {
-            @Override
-            public void onAuthStateChanged(@NonNull FirebaseAuth auth) {
-                FirebaseUser user = auth.getCurrentUser();
-                if (user == null) {
-                    if (Constants.sFirebaseTeams != NOOP_ARRAY) {
-                        Constants.sFirebaseTeams.removeAllListeners();
-                        Constants.sFirebaseTeams = NOOP_ARRAY;
-                    }
-                } else {
-                    // Log uid to help debug db crashes
-                    FirebaseCrash.log(user.getUid());
-                    AnalyticsHelper.updateUserId();
+        FirebaseAuth.getInstance().addAuthStateListener(auth -> {
+            FirebaseUser user = auth.getCurrentUser();
+            if (user == null) {
+                removeTeamsListener();
+                removeScoutTemplatesListener();
+            } else {
+                // Log uid to help debug db crashes
+                FirebaseCrash.log(user.getUid());
+                AnalyticsHelper.updateUserId();
 
-                    Constants.sFirebaseTeams.removeAllListeners();
-                    Constants.sFirebaseTeams = new FirebaseIndexArray<>(
-                            TeamHelper.getIndicesRef(),
-                            Constants.FIREBASE_TEAMS,
-                            TEAM_PARSER);
-
-                    Constants.sFirebaseTeams.addChangeEventListener(new ChangeEventListener() {
-                        @Override
-                        public void onChildChanged(EventType type,
-                                                   DataSnapshot snapshot,
-                                                   int index,
-                                                   int oldIndex) {
-                            if (type == EventType.ADDED) {
-                                Constants.sFirebaseTeams.getObject(index)
-                                        .getHelper()
-                                        .fetchLatestData(appContext);
-                            }
-                        }
-
-                        @Override
-                        public void onDataChanged() {
-                            // Noop
-                        }
-
-                        @Override
-                        public void onCancelled(DatabaseError error) {
-                            FirebaseCrash.report(error.toException());
-                        }
-                    });
-                    Constants.sFirebaseTeams.addChangeEventListener(
-                            new TeamMergerListener(appContext));
-                }
+                addTeamsListener(appContext);
+                addScoutTemplatesListener();
             }
         });
 
         Constants.FIREBASE_DEFAULT_TEMPLATE.addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
-                // There's a bug in Firebase where the cache is not updated with an addListenerForSingleValueEvent
+                Constants.sDefaultTemplate = snapshot;
             }
 
             @Override
@@ -165,6 +135,70 @@ public final class DatabaseHelper {
                 FirebaseCrash.report(error.toException());
             }
         });
+    }
+
+    private static void addTeamsListener(final Context appContext) {
+        Constants.sFirebaseTeams.removeAllListeners();
+        Constants.sFirebaseTeams = new FirebaseIndexArray<>(
+                TeamHelper.getIndicesRef(),
+                Constants.FIREBASE_TEAMS,
+                TEAM_PARSER);
+
+        Constants.sFirebaseTeams.addChangeEventListener(new ChangeEventListenerBase() {
+            @Override
+            public void onChildChanged(EventType type,
+                                       DataSnapshot snapshot,
+                                       int index,
+                                       int oldIndex) {
+                if (type == EventType.ADDED) {
+                    Constants.sFirebaseTeams.getObject(index)
+                            .getHelper()
+                            .fetchLatestData(appContext);
+                }
+            }
+        });
+        Constants.sFirebaseTeams.addChangeEventListener(new TeamMergerListener(appContext));
+    }
+
+    private static void removeTeamsListener() {
+        if (Constants.sFirebaseTeams != TEAM_NOOP_ARRAY) {
+            Constants.sFirebaseTeams.removeAllListeners();
+            Constants.sFirebaseTeams = TEAM_NOOP_ARRAY;
+        }
+    }
+
+    private static void addScoutTemplatesListener() {
+        Constants.sFirebaseScoutTemplates.removeAllListeners();
+        Constants.sFirebaseScoutTemplates = new FirebaseIndexArray<>(
+                UserHelper.getScoutTemplateIndicesRef(),
+                Constants.FIREBASE_SCOUT_TEMPLATES,
+                SCOUT_PARSER);
+
+        Constants.sFirebaseScoutTemplates.addChangeEventListener(new ChangeEventListenerBase());
+    }
+
+    private static void removeScoutTemplatesListener() {
+        if (Constants.sFirebaseScoutTemplates != SCOUT_TEMPLATES_NOOP_ARRAY) {
+            Constants.sFirebaseScoutTemplates.removeAllListeners();
+            Constants.sFirebaseScoutTemplates = SCOUT_TEMPLATES_NOOP_ARRAY;
+        }
+    }
+
+    public static class ChangeEventListenerBase implements ChangeEventListener {
+        @Override
+        public void onChildChanged(EventType type, DataSnapshot snapshot, int index, int oldIndex) {
+            // Noop
+        }
+
+        @Override
+        public void onDataChanged() {
+            // Noop
+        }
+
+        @Override
+        public void onCancelled(DatabaseError error) {
+            FirebaseCrash.report(error.toException());
+        }
     }
 
     private static final class DatabaseHolder {
@@ -177,19 +211,30 @@ public final class DatabaseHelper {
         }
     }
 
-    private static class TeamMergerListener implements ChangeEventListener, OnSuccessListener<DatabaseReference> {
+    private static final class NoopArrayBase<T> extends ObservableSnapshotArray<T> {
+        public NoopArrayBase(@NonNull Class<T> clazz) {
+            super(clazz);
+        }
+
+        @Override
+        protected List<DataSnapshot> getSnapshots() {
+            return new ArrayList<>();
+        }
+    }
+
+    private static final class TeamMergerListener extends ChangeEventListenerBase {
         private Context mAppContext;
 
         public TeamMergerListener(Context appContext) {
+            super();
             mAppContext = appContext;
         }
 
         @Override
-        public void onChildChanged(EventType type,
-                                   DataSnapshot snapshot,
-                                   int i,
-                                   int i1) {
-            if (ConnectivityHelper.isOffline(mAppContext)) return;
+        public void onChildChanged(EventType type, DataSnapshot snapshot, int index, int oldIndex) {
+            if (ConnectivityHelper.isOffline(mAppContext) && !(type == EventType.ADDED || type == EventType.CHANGED)) {
+                return;
+            }
 
             List<TeamHelper> rawTeams = new ArrayList<>();
             for (int j = 0; j < Constants.sFirebaseTeams.size(); j++) {
@@ -213,55 +258,21 @@ public final class DatabaseHelper {
             }
         }
 
-        private void mergeTeams(final List<TeamHelper> teams) {
+        private void mergeTeams(List<TeamHelper> teams) {
             Collections.sort(teams);
-            final Team oldTeam = teams.remove(0).getTeam();
+            Team oldTeam = teams.remove(0).getTeam();
 
             for (TeamHelper teamHelper : teams) {
-                final Team newTeam = teamHelper.getTeam();
+                Team newTeam = teamHelper.getTeam();
 
                 DatabaseHelper.forceUpdate(ScoutUtils.getIndicesRef(newTeam.getKey()))
-                        .addOnSuccessListener(new OnSuccessListener<Query>() {
-                            @Override
-                            public void onSuccess(Query query) {
-                                Task<List<Task<DatabaseReference>>> copyTask =
-                                        new FirebaseCopier(query,
-                                                           ScoutUtils.getIndicesRef(oldTeam.getKey()))
-                                                .performTransformation();
-                                copyTask.addOnSuccessListener(new OnSuccessListener<List<Task<DatabaseReference>>>() {
-                                    @Override
-                                    public void onSuccess(List<Task<DatabaseReference>> tasks) {
-                                        for (Task<DatabaseReference> task : tasks) {
-                                            task.addOnSuccessListener(TeamMergerListener.this);
-                                        }
-
-                                        Tasks.whenAll(tasks)
-                                                .addOnSuccessListener(new OnSuccessListener<Void>() {
-                                                    @Override
-                                                    public void onSuccess(Void aVoid) {
-                                                        newTeam.getHelper().deleteTeam();
-                                                    }
-                                                });
-                                    }
-                                });
-                            }
-                        });
+                        .addOnSuccessListener(query -> new FirebaseCopier(query,
+                                                                          ScoutUtils.getIndicesRef(
+                                                                                  oldTeam.getKey()))
+                                .performTransformation()
+                                .continueWithTask(task -> task.getResult().getRef().removeValue())
+                                .addOnSuccessListener(aVoid -> newTeam.getHelper().deleteTeam()));
             }
-        }
-
-        @Override
-        public void onSuccess(DatabaseReference ref) {
-            ref.removeValue();
-        }
-
-        @Override
-        public void onDataChanged() {
-            // No-op
-        }
-
-        @Override
-        public void onCancelled(DatabaseError error) {
-            FirebaseCrash.report(error.toException());
         }
     }
 }

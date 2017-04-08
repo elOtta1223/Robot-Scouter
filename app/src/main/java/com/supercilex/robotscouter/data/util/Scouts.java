@@ -20,7 +20,6 @@ import com.google.firebase.database.ValueEventListener;
 import com.supercilex.robotscouter.data.model.Scout;
 import com.supercilex.robotscouter.util.ConnectivityHelper;
 import com.supercilex.robotscouter.util.Constants;
-import com.supercilex.robotscouter.util.DatabaseHelper;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -51,33 +50,27 @@ public final class Scouts implements Builder<Task<Map<TeamHelper, List<Scout>>>>
     @Override
     public Task<Map<TeamHelper, List<Scout>>> build() {
         List<Task<Pair<TeamHelper, List<String>>>> scoutIndicesTasks = new ArrayList<>();
-        for (final TeamHelper helper : mTeamHelpers) {
+        for (TeamHelper helper : mTeamHelpers) {
             final TaskCompletionSource<Pair<TeamHelper, List<String>>> scoutIndicesTask = new TaskCompletionSource<>();
             scoutIndicesTasks.add(scoutIndicesTask.getTask());
 
-            DatabaseHelper.forceUpdate(ScoutUtils.getIndicesRef(helper.getTeam().getKey()))
-                    .addOnSuccessListener(new OnSuccessListener<Query>() {
+            ScoutUtils.getIndicesRef(helper.getTeam().getKey())
+                    .addListenerForSingleValueEvent(new ValueEventListener() {
                         @Override
-                        public void onSuccess(Query query) {
-                            query.addListenerForSingleValueEvent(new ValueEventListener() {
-                                @Override
-                                public void onDataChange(DataSnapshot snapshot) {
-                                    List<String> scoutKeys = new ArrayList<>();
-                                    for (DataSnapshot scoutKeyTemplate : snapshot.getChildren()) {
-                                        scoutKeys.add(scoutKeyTemplate.getKey());
-                                    }
-                                    scoutIndicesTask.setResult(Pair.create(helper, scoutKeys));
-                                }
-
-                                @Override
-                                public void onCancelled(DatabaseError error) {
-                                    scoutIndicesTask.setException(error.toException());
-                                    FirebaseCrash.report(error.toException());
-                                }
-                            });
+                        public void onDataChange(DataSnapshot snapshot) {
+                            List<String> scoutKeys = new ArrayList<>();
+                            for (DataSnapshot scoutKeyTemplate : snapshot.getChildren()) {
+                                scoutKeys.add(scoutKeyTemplate.getKey());
+                            }
+                            scoutIndicesTask.setResult(Pair.create(helper, scoutKeys));
                         }
-                    })
-                    .addOnFailureListener(this);
+
+                        @Override
+                        public void onCancelled(DatabaseError error) {
+                            scoutIndicesTask.setException(error.toException());
+                            FirebaseCrash.report(error.toException());
+                        }
+                    });
         }
 
 
@@ -85,26 +78,18 @@ public final class Scouts implements Builder<Task<Map<TeamHelper, List<Scout>>>>
             scoutKeysTask.addOnSuccessListener(this).addOnFailureListener(this);
         }
 
-        Tasks.whenAll(scoutIndicesTasks).addOnSuccessListener(new OnSuccessListener<Void>() {
-            @Override
-            public void onSuccess(Void aVoid) {
-                Tasks.whenAll(mScoutMetricsTasks)
-                        .addOnSuccessListener(new OnSuccessListener<Void>() {
-                            @Override
-                            public void onSuccess(Void aVoid) {
-                                mScoutsTask.setResult(mScouts);
-                            }
-                        })
-                        .addOnFailureListener(Scouts.this);
-            }
-        }).addOnFailureListener(this);
+        Tasks.whenAll(scoutIndicesTasks)
+                .addOnSuccessListener(aVoid -> Tasks.whenAll(mScoutMetricsTasks)
+                        .addOnSuccessListener(aVoid1 -> mScoutsTask.setResult(mScouts))
+                        .addOnFailureListener(this))
+                .addOnFailureListener(this);
 
 
         return mScoutsTask.getTask();
     }
 
     @Override
-    public void onSuccess(final Pair<TeamHelper, List<String>> pair) {
+    public void onSuccess(Pair<TeamHelper, List<String>> pair) {
         for (String scoutKey : pair.second) {
             final TaskCompletionSource<Void> scoutMetricsTask = new TaskCompletionSource<>();
             mScoutMetricsTasks.add(scoutMetricsTask.getTask());
@@ -118,7 +103,7 @@ public final class Scouts implements Builder<Task<Map<TeamHelper, List<Scout>>>>
         mScoutsTask.setException(e);
     }
 
-    private class ScoutListener implements ChildEventListener, ValueEventListener, OnSuccessListener<Void> {
+    private class ScoutListener implements ChildEventListener, ValueEventListener {
         private static final int TIMEOUT = 1;
 
         private Query mQuery;
@@ -138,15 +123,6 @@ public final class Scouts implements Builder<Task<Map<TeamHelper, List<Scout>>>>
             mScoutMetricsTask = scoutMetricsTask;
 
             resetTimeout();
-            if (ConnectivityHelper.isOffline(mContext)) {
-                addListeners();
-            } else {
-                Tasks.whenAll(DatabaseHelper.forceUpdate(mQuery)).addOnSuccessListener(this);
-            }
-        }
-
-        @Override
-        public void onSuccess(Void aVoid) {
             addListeners();
         }
 
@@ -187,6 +163,7 @@ public final class Scouts implements Builder<Task<Map<TeamHelper, List<Scout>>>>
             mTimer.cancel();
             mMetricsQuery.removeEventListener((ChildEventListener) this);
             mQuery.removeEventListener((ValueEventListener) this);
+
             if (!mScout.getMetrics().isEmpty()) {
                 List<Scout> scouts = mScouts.get(mPair.first);
                 if (scouts == null) {

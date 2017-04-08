@@ -15,11 +15,11 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 
-import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.android.gms.tasks.TaskCompletionSource;
 import com.google.firebase.auth.FirebaseAuth;
 import com.supercilex.robotscouter.R;
 import com.supercilex.robotscouter.RobotScouter;
+import com.supercilex.robotscouter.data.client.SpreadsheetExporter;
 import com.supercilex.robotscouter.util.Constants;
 
 import java.util.List;
@@ -138,15 +138,10 @@ public class TeamListFragment extends Fragment implements FirebaseAuth.AuthState
         return mMenuHelper.onOptionsItemSelected(item);
     }
 
-    public void selectTeam(final String teamKey) {
+    public void selectTeam(String teamKey) {
         if (mAdapter == null) {
             mOnAdapterReadyTask.getTask()
-                    .addOnSuccessListener(new OnSuccessListener<TeamListAdapter>() {
-                        @Override
-                        public void onSuccess(TeamListAdapter adapter) {
-                            adapter.updateSelection(teamKey);
-                        }
-                    });
+                    .addOnSuccessListener(adapter -> adapter.updateSelection(teamKey));
         } else {
             mAdapter.updateSelection(teamKey);
         }
@@ -176,7 +171,7 @@ public class TeamListFragment extends Fragment implements FirebaseAuth.AuthState
     }
 
     /**
-     * Used in {@link SpreadsheetWriter#writeAndShareTeams(Fragment, List)}
+     * Used in {@link SpreadsheetExporter#writeAndShareTeams(Fragment, List)}
      * <p>
      * {@inheritDoc}
      */

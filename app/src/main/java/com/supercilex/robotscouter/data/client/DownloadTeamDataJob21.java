@@ -8,11 +8,8 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.os.Build;
 import android.os.PersistableBundle;
-import android.support.annotation.NonNull;
 import android.support.annotation.RequiresApi;
 
-import com.google.android.gms.tasks.OnFailureListener;
-import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.firebase.crash.FirebaseCrash;
 import com.supercilex.robotscouter.data.model.Team;
 import com.supercilex.robotscouter.data.remote.TbaApi;
@@ -54,9 +51,9 @@ public class DownloadTeamDataJob21 extends JobService {
     }
 
     @Override
-    public boolean onStartJob(final JobParameters params) {
+    public boolean onStartJob(JobParameters params) {
         PersistableBundle extras = params.getExtras();
-        final TeamHelper oldTeamHelper = new Team.Builder(extras.getString("number"))
+        TeamHelper oldTeamHelper = new Team.Builder(extras.getString("number"))
                 .setKey(extras.getString("key"))
                 .setTemplateKey(extras.getString("template-key"))
                 .setName(extras.getString("name"))
@@ -71,19 +68,11 @@ public class DownloadTeamDataJob21 extends JobService {
 
 
         TbaApi.fetch(oldTeamHelper.getTeam(), getApplicationContext())
-                .addOnSuccessListener(new OnSuccessListener<Team>() {
-                    @Override
-                    public void onSuccess(Team newTeam) {
-                        oldTeamHelper.updateTeam(newTeam);
-                        jobFinished(params, false);
-                    }
+                .addOnSuccessListener(newTeam -> {
+                    oldTeamHelper.updateTeam(newTeam);
+                    jobFinished(params, false);
                 })
-                .addOnFailureListener(new OnFailureListener() {
-                    @Override
-                    public void onFailure(@NonNull Exception e) {
-                        jobFinished(params, true);
-                    }
-                });
+                .addOnFailureListener(e -> jobFinished(params, true));
         return true;
     }
 

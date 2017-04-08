@@ -2,7 +2,6 @@ package com.supercilex.robotscouter.data.client;
 
 import android.content.Context;
 import android.os.Bundle;
-import android.support.annotation.NonNull;
 
 import com.firebase.jobdispatcher.Constraint;
 import com.firebase.jobdispatcher.FirebaseJobDispatcher;
@@ -11,8 +10,6 @@ import com.firebase.jobdispatcher.Job;
 import com.firebase.jobdispatcher.JobParameters;
 import com.firebase.jobdispatcher.JobService;
 import com.firebase.jobdispatcher.Trigger;
-import com.google.android.gms.tasks.OnFailureListener;
-import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.firebase.crash.FirebaseCrash;
 import com.supercilex.robotscouter.data.model.Team;
 import com.supercilex.robotscouter.data.remote.TbaApi;
@@ -57,9 +54,9 @@ public class DownloadTeamDataJob14 extends JobService {
     }
 
     @Override
-    public boolean onStartJob(final JobParameters params) {
+    public boolean onStartJob(JobParameters params) {
         Bundle extras = params.getExtras();
-        final TeamHelper oldTeamHelper = new Team.Builder(extras.getString("number"))
+        TeamHelper oldTeamHelper = new Team.Builder(extras.getString("number"))
                 .setKey(extras.getString("key"))
                 .setTemplateKey(extras.getString("template-key"))
                 .setName(extras.getString("name"))
@@ -73,19 +70,11 @@ public class DownloadTeamDataJob14 extends JobService {
                 .getHelper();
 
         TbaApi.fetch(oldTeamHelper.getTeam(), getApplicationContext())
-                .addOnSuccessListener(new OnSuccessListener<Team>() {
-                    @Override
-                    public void onSuccess(Team newTeam) {
-                        oldTeamHelper.updateTeam(newTeam);
-                        jobFinished(params, false);
-                    }
+                .addOnSuccessListener(newTeam -> {
+                    oldTeamHelper.updateTeam(newTeam);
+                    jobFinished(params, false);
                 })
-                .addOnFailureListener(new OnFailureListener() {
-                    @Override
-                    public void onFailure(@NonNull Exception e) {
-                        jobFinished(params, true);
-                    }
-                });
+                .addOnFailureListener(e -> jobFinished(params, true));
         return true;
     }
 

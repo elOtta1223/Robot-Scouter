@@ -1,29 +1,33 @@
-package com.supercilex.robotscouter.ui.teamlist;
+package com.supercilex.robotscouter.data.client;
 
 import android.Manifest;
-import android.app.Activity;
-import android.app.Application;
-import android.app.ProgressDialog;
-import android.content.ActivityNotFoundException;
+import android.app.IntentService;
+import android.app.Notification;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ResolveInfo;
 import android.graphics.Paint;
 import android.net.Uri;
 import android.os.Build;
-import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
-import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.annotation.PluralsRes;
 import android.support.annotation.RequiresPermission;
 import android.support.annotation.Size;
+import android.support.design.widget.Snackbar;
 import android.support.v4.app.Fragment;
+import android.support.v4.content.ContextCompat;
 import android.text.TextUtils;
+import android.util.Pair;
 import android.widget.Toast;
 
-import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.android.gms.tasks.Task;
+import com.google.android.gms.tasks.Tasks;
 import com.google.firebase.crash.FirebaseCrash;
 import com.supercilex.robotscouter.R;
 import com.supercilex.robotscouter.data.model.Scout;
@@ -33,16 +37,27 @@ import com.supercilex.robotscouter.data.model.metrics.SpinnerMetric;
 import com.supercilex.robotscouter.data.model.metrics.StopwatchMetric;
 import com.supercilex.robotscouter.data.util.Scouts;
 import com.supercilex.robotscouter.data.util.TeamHelper;
-import com.supercilex.robotscouter.util.AsyncTaskExecutor;
 import com.supercilex.robotscouter.util.ConnectivityHelper;
 import com.supercilex.robotscouter.util.Constants;
+import com.supercilex.robotscouter.util.PreferencesHelper;
 
 import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+import org.apache.poi.ss.formula.OperationEvaluationContext;
+import org.apache.poi.ss.formula.WorkbookEvaluator;
+import org.apache.poi.ss.formula.eval.ErrorEval;
+import org.apache.poi.ss.formula.eval.NumberEval;
+import org.apache.poi.ss.formula.eval.ValueEval;
+import org.apache.poi.ss.formula.functions.Countif;
+import org.apache.poi.ss.formula.functions.FreeRefFunction;
+import org.apache.poi.ss.formula.functions.Sumif;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.CellType;
+import org.apache.poi.ss.usermodel.Chart;
 import org.apache.poi.ss.usermodel.ClientAnchor;
 import org.apache.poi.ss.usermodel.Comment;
 import org.apache.poi.ss.usermodel.CreationHelper;
+import org.apache.poi.ss.usermodel.Drawing;
 import org.apache.poi.ss.usermodel.Font;
 import org.apache.poi.ss.usermodel.HorizontalAlignment;
 import org.apache.poi.ss.usermodel.RichTextString;
@@ -50,122 +65,256 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.VerticalAlignment;
 import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.ss.usermodel.charts.AxisCrosses;
+import org.apache.poi.ss.usermodel.charts.AxisPosition;
+import org.apache.poi.ss.usermodel.charts.ChartAxis;
+import org.apache.poi.ss.usermodel.charts.ChartDataSource;
+import org.apache.poi.ss.usermodel.charts.ChartLegend;
+import org.apache.poi.ss.usermodel.charts.DataSources;
+import org.apache.poi.ss.usermodel.charts.LegendPosition;
+import org.apache.poi.ss.usermodel.charts.LineChartData;
+import org.apache.poi.ss.usermodel.charts.ScatterChartData;
+import org.apache.poi.ss.usermodel.charts.ValueAxis;
 import org.apache.poi.ss.util.CellRangeAddress;
 import org.apache.poi.ss.util.WorkbookUtil;
+import org.apache.poi.xssf.usermodel.XSSFChart;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.openxmlformats.schemas.drawingml.x2006.chart.CTChart;
+import org.openxmlformats.schemas.drawingml.x2006.chart.CTPlotArea;
+import org.openxmlformats.schemas.drawingml.x2006.chart.CTTitle;
+import org.openxmlformats.schemas.drawingml.x2006.main.CTTextBody;
+import org.openxmlformats.schemas.drawingml.x2006.main.CTTextParagraph;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.lang.ref.WeakReference;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Random;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import pub.devrel.easypermissions.EasyPermissions;
 
 import static org.apache.poi.ss.usermodel.Row.MissingCellPolicy;
 
-public final class SpreadsheetWriter implements OnSuccessListener<Map<TeamHelper, List<Scout>>> {
-    public static final String[] PERMS = {Manifest.permission.WRITE_EXTERNAL_STORAGE};
+public final class SpreadsheetExporter extends IntentService implements OnSuccessListener<Map<TeamHelper, List<Scout>>> {
+    private static final String TAG = "SpreadsheetExporter";
+    public static final List<String> PERMS = Collections.singletonList(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+
+    private static final List<String> UNSUPPORTED_DEVICES =
+            Collections.unmodifiableList(Arrays.asList("SAMSUNG-SM-N900A"));
 
     private static final String EXPORT_FOLDER_NAME = "Robot Scouter/";
     private static final String MIME_TYPE_MS_EXCEL = "application/vnd.ms-excel";
+    private static final String MIME_TYPE_ALL = "*/*";
     private static final String FILE_EXTENSION = ".xlsx";
     private static final String UNSUPPORTED_FILE_EXTENSION = ".xls";
     private static final int MAX_SHEET_LENGTH = 31;
     private static final int COLUMN_WIDTH_SCALE_FACTOR = 46;
     private static final int CELL_WIDTH_CEILING = 7500;
 
-    private Context mContext;
-    private ProgressDialogManager mProgressDialog;
+    private static final FreeRefFunction AVERAGEIF = new FreeRefFunction() {
+        @Override
+        public ValueEval evaluate(ValueEval[] args, OperationEvaluationContext context) {
+            if (args.length >= 2 && args.length % 2 == 0) {
+                double result = 0;
+
+                for (int i = 0; i < args.length; i += 2) {
+                    ValueEval firstArg = args[i];
+                    ValueEval secondArg = args[i + 1];
+                    NumberEval evaluate = evaluate(context.getRowIndex(),
+                                                   context.getColumnIndex(),
+                                                   firstArg,
+                                                   secondArg);
+
+                    result = evaluate.getNumberValue();
+                }
+
+                return new NumberEval(result);
+            } else {
+                return ErrorEval.VALUE_INVALID;
+            }
+        }
+
+        private NumberEval evaluate(int srcRowIndex,
+                                    int srcColumnIndex,
+                                    ValueEval arg0,
+                                    ValueEval arg1) {
+            NumberEval totalEval =
+                    (NumberEval) new Sumif().evaluate(srcRowIndex, srcColumnIndex, arg0, arg1);
+            NumberEval countEval =
+                    (NumberEval) new Countif().evaluate(srcRowIndex, srcColumnIndex, arg0, arg1);
+
+            return new NumberEval(totalEval.getNumberValue() / countEval.getNumberValue());
+        }
+    };
+
+    static {
+        System.setProperty("org.apache.poi.javax.xml.stream.XMLInputFactory",
+                           "com.fasterxml.aalto.stax.InputFactoryImpl");
+        System.setProperty("org.apache.poi.javax.xml.stream.XMLOutputFactory",
+                           "com.fasterxml.aalto.stax.OutputFactoryImpl");
+        System.setProperty("org.apache.poi.javax.xml.stream.XMLEventFactory",
+                           "com.fasterxml.aalto.stax.EventFactoryImpl");
+        WorkbookEvaluator.registerFunction("AVERAGEIF", AVERAGEIF);
+    }
 
     private Map<TeamHelper, List<Scout>> mScouts;
     private List<Cell> mTemporaryCommentCells = new ArrayList<>();
     private CreationHelper mCreationHelper;
 
-    @RequiresPermission(value = Manifest.permission.WRITE_EXTERNAL_STORAGE)
-    private SpreadsheetWriter(Fragment fragment, @Size(min = 1) List<TeamHelper> teamHelpers) {
-        mContext = fragment.getContext().getApplicationContext();
-        mProgressDialog = ProgressDialogManager.show(fragment.getActivity());
-
-        Collections.sort(teamHelpers);
-        Scouts.getAll(teamHelpers, mContext)
-                .addOnSuccessListener(AsyncTaskExecutor.INSTANCE, this)
-                .addOnFailureListener(new OnFailureListener() {
-                    @Override
-                    public void onFailure(@NonNull Exception e) {
-                        showError(e);
-                    }
-                });
-
-        if (ConnectivityHelper.isOffline(mContext)) {
-            Toast.makeText(mContext, R.string.exporting_offline, Toast.LENGTH_LONG).show();
-        }
+    public SpreadsheetExporter() {
+        super(TAG);
+        setIntentRedelivery(true);
     }
 
     /**
      * @return true if an export was attempted, false otherwise
      */
+    @SuppressWarnings("MissingPermission")
     public static boolean writeAndShareTeams(Fragment fragment,
                                              @Size(min = 1) List<TeamHelper> teamHelpers) {
         if (teamHelpers.isEmpty()) return false;
 
-        if (!EasyPermissions.hasPermissions(fragment.getContext(), PERMS)) {
+        Context context = fragment.getContext();
+
+        String[] permsArray = PERMS.toArray(new String[PERMS.size()]);
+        if (!EasyPermissions.hasPermissions(context, permsArray)) {
             EasyPermissions.requestPermissions(
                     fragment,
                     fragment.getString(R.string.write_storage_rationale),
                     8653,
-                    PERMS);
+                    permsArray);
             return false;
         }
 
-        //noinspection MissingPermission
-        new SpreadsheetWriter(fragment, new ArrayList<>(teamHelpers));
+        if (PreferencesHelper.shouldShowExportHint(context)) {
+            Snackbar.make(fragment.getView(),
+                          R.string.exporting_spreadsheet_hint,
+                          Snackbar.LENGTH_LONG)
+                    .setAction(R.string.never_again,
+                               v -> PreferencesHelper.setShouldShowExportHint(context, false))
+                    .show();
+        }
+
+        fragment.getActivity()
+                .startService(new Intent(context, SpreadsheetExporter.class)
+                                      .putExtras(TeamHelper.toIntent(teamHelpers)));
 
         return true;
     }
 
+    private void updateNotification(Notification notification) {
+        updateNotification(R.string.exporting_spreadsheet_title, notification);
+    }
+
+    private void updateNotification(int id, Notification notification) {
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        nm.notify(id, notification);
+    }
+
+    private Notification getExportNotification(String text) {
+        Notification.Builder builder = new Notification.Builder(this)
+                .setSmallIcon(R.drawable.ic_logo)
+                .setContentTitle(getString(R.string.exporting_spreadsheet_title))
+                .setContentText(text)
+                .setOngoing(true)
+                .setPriority(Notification.PRIORITY_MIN);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            builder.setColor(ContextCompat.getColor(this, R.color.colorPrimary));
+        }
+
+        return builder.build();
+    }
+
+    @RequiresPermission(value = Manifest.permission.WRITE_EXTERNAL_STORAGE)
+    @Override
+    protected void onHandleIntent(Intent intent) {
+        startForeground(R.string.exporting_spreadsheet_title,
+                        getExportNotification(getString(R.string.exporting_spreadsheet_loading)));
+
+        if (ConnectivityHelper.isOffline(this)) {
+            new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(this,
+                                                                          R.string.exporting_offline,
+                                                                          Toast.LENGTH_LONG)
+                    .show());
+        }
+
+        List<TeamHelper> teamHelpers = TeamHelper.getList(intent);
+        Collections.sort(teamHelpers);
+        try {
+            Tasks.await(Scouts.getAll(teamHelpers, this)); // Force a refresh
+
+            Task<Map<TeamHelper, List<Scout>>> fetchTeamsTask =
+                    Scouts.getAll(teamHelpers, this).addOnFailureListener(this::showError);
+            Tasks.await(fetchTeamsTask);
+            if (fetchTeamsTask.isSuccessful()) onSuccess(fetchTeamsTask.getResult());
+        } catch (ExecutionException | InterruptedException e) {
+            showError(e);
+        }
+    }
+
     @Override
     public void onSuccess(Map<TeamHelper, List<Scout>> scouts) {
-        mProgressDialog.setMessage(mContext.getString(R.string.exporting_spreadsheet));
-
         mScouts = scouts;
         Uri spreadsheetUri = getFileUri();
-
-        mProgressDialog.dismiss();
 
         if (spreadsheetUri == null) return;
 
         Intent sharingIntent = new Intent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
 
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-            sharingIntent.setAction(Intent.ACTION_VIEW)
-                    .setDataAndType(spreadsheetUri, MIME_TYPE_MS_EXCEL);
-            try {
-                mContext.startActivity(sharingIntent);
-            } catch (ActivityNotFoundException e) {
-                sharingIntent.setDataAndType(spreadsheetUri, "*/*");
-                mContext.startActivity(sharingIntent);
-            }
-        } else {
-            sharingIntent.setAction(Intent.ACTION_SEND)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Intent typeIntent = sharingIntent.setAction(Intent.ACTION_SEND)
                     .setType(MIME_TYPE_MS_EXCEL)
                     .putExtra(Intent.EXTRA_STREAM, spreadsheetUri);
-            mContext.startActivity(Intent.createChooser(sharingIntent, getShareTitle())
-                                           .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                           .addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS));
+
+            sharingIntent = Intent.createChooser(typeIntent,
+                                                 getPluralTeams(R.plurals.share_spreadsheet_title))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+        } else {
+            sharingIntent.setAction(Intent.ACTION_VIEW)
+                    .setDataAndType(spreadsheetUri, MIME_TYPE_MS_EXCEL);
+
+            List<ResolveInfo> supportedActivities =
+                    getPackageManager().queryIntentActivities(sharingIntent, 0);
+            if (supportedActivities.isEmpty()) {
+                sharingIntent.setDataAndType(spreadsheetUri, MIME_TYPE_ALL);
+            }
         }
+
+        Notification.Builder builder = new Notification.Builder(this)
+                .setSmallIcon(R.drawable.ic_done_white_48dp)
+                .setContentTitle(getPluralTeams(R.plurals.exporting_spreadsheet_complete_title))
+                .setContentIntent(PendingIntent.getActivity(this,
+                                                            0,
+                                                            sharingIntent,
+                                                            PendingIntent.FLAG_ONE_SHOT))
+                .setWhen(System.currentTimeMillis())
+                .setAutoCancel(true)
+                .setDefaults(Notification.DEFAULT_ALL)
+                .setPriority(Notification.PRIORITY_HIGH);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
+            builder.setShowWhen(true);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            builder.setColor(ContextCompat.getColor(this, R.color.colorPrimary));
+        }
+
+        updateNotification(new Random().nextInt(Integer.MAX_VALUE - 1) + 1, builder.build());
+        stopForeground(true);
     }
 
-    private String getShareTitle() {
-        return mContext.getResources()
-                .getQuantityString(R.plurals.share_spreadsheet_title,
-                                   mScouts.size(),
-                                   getTeamNames());
+    private String getPluralTeams(@PluralsRes int id) {
+        return getResources().getQuantityString(id, mScouts.size(), getTeamNames());
     }
 
     @Nullable
@@ -202,13 +351,8 @@ public final class SpreadsheetWriter implements OnSuccessListener<Map<TeamHelper
             getWorkbook().write(stream);
 
             return absoluteFile;
-        } catch (final IOException e) {
-            new Handler(Looper.getMainLooper()).post(new Runnable() {
-                @Override
-                public void run() {
-                    showError(e);
-                }
-            });
+        } catch (IOException e) {
+            new Handler(Looper.getMainLooper()).post(() -> showError(e));
             absoluteFile.delete();
         } finally {
             if (stream != null) try {
@@ -256,18 +400,13 @@ public final class SpreadsheetWriter implements OnSuccessListener<Map<TeamHelper
     }
 
     private Workbook getWorkbook() {
-        setApacheProperties();
-
         Workbook workbook;
         if (isUnsupportedDevice()) {
             workbook = new HSSFWorkbook();
-            new Handler(Looper.getMainLooper()).post(new Runnable() {
-                @Override
-                public void run() {
-                    Toast.makeText(mContext, R.string.unsupported_device, Toast.LENGTH_SHORT)
-                            .show();
-                }
-            });
+            new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(this,
+                                                                          R.string.unsupported_device,
+                                                                          Toast.LENGTH_SHORT)
+                    .show());
         } else {
             workbook = new XSSFWorkbook();
         }
@@ -281,15 +420,18 @@ public final class SpreadsheetWriter implements OnSuccessListener<Map<TeamHelper
 
         List<TeamHelper> teamHelpers = getTeamHelpers();
         for (TeamHelper teamHelper : teamHelpers) {
+            updateNotification(getExportNotification(getString(R.string.exporting_spreadsheet_team,
+                                                               teamHelper)));
+
             Sheet teamSheet = workbook.createSheet(getSafeName(workbook, teamHelper));
             teamSheet.createFreezePane(1, 1);
             buildTeamSheet(teamHelper, teamSheet);
         }
 
+        updateNotification(getExportNotification(getString(R.string.exporting_spreadsheet_average)));
         if (averageSheet != null) buildTeamAveragesSheet(averageSheet);
 
         setColumnWidths(workbook);
-
         for (Cell cell : mTemporaryCommentCells) cell.removeCellComment();
 
         return workbook;
@@ -349,8 +491,7 @@ public final class SpreadsheetWriter implements OnSuccessListener<Map<TeamHelper
 
                     for (Row row1 : rows) {
                         Cell cell1 = row1.getCell(0);
-                        String rowKey = cell1.getCellComment().getString().toString();
-                        if (TextUtils.equals(rowKey, metric.getKey())) {
+                        if (TextUtils.equals(getMetricKey(row1), metric.getKey())) {
                             setRowValue(column, metric, row1);
 
                             if (TextUtils.isEmpty(cell1.getStringCellValue())) {
@@ -387,12 +528,15 @@ public final class SpreadsheetWriter implements OnSuccessListener<Map<TeamHelper
             if (last > farthestColumn) farthestColumn = last;
         }
 
+        Map<Chart, Pair<LineChartData, List<ChartAxis>>> chartData = new HashMap<>();
+        Map<ScoutMetric<Void>, Chart> chartPool = new HashMap<>();
+
         Iterator<Row> rowIterator = sheet.rowIterator();
         for (int i = 0; rowIterator.hasNext(); i++) {
             Row row = rowIterator.next();
             Cell cell = row.createCell(farthestColumn);
             if (i == 0) {
-                cell.setCellValue(mContext.getString(R.string.average));
+                cell.setCellValue(getString(R.string.average));
                 cell.setCellStyle(createHeaderStyle(sheet.getWorkbook()));
                 continue;
             }
@@ -400,8 +544,8 @@ public final class SpreadsheetWriter implements OnSuccessListener<Map<TeamHelper
             Cell first = row.getCell(1, MissingCellPolicy.CREATE_NULL_AS_BLANK);
             cell.setCellStyle(first.getCellStyle());
 
-            String key = row.getCell(0).getCellComment().getString().toString();
-            @MetricType int type = getMetricType(teamHelper, key);
+            String key = getMetricKey(row);
+            @MetricType int type = getMetric(teamHelper, key).getType();
 
             String rangeAddress = getRangeAddress(
                     first,
@@ -416,23 +560,30 @@ public final class SpreadsheetWriter implements OnSuccessListener<Map<TeamHelper
                             "SUM(" + rangeAddress + ")" +
                                     " / " +
                                     "COUNT(" + rangeAddress + ")");
+
+                    buildTeamChart(row, teamHelper, chartData, chartPool);
                     break;
                 case MetricType.STOPWATCH:
                     String excludeZeros = "\"<>0\"";
                     cell.setCellFormula(
                             "IF(COUNTIF(" + rangeAddress + ", " + excludeZeros +
                                     ") = 0, 0, AVERAGEIF(" + rangeAddress + ", " + excludeZeros + "))");
+
+                    buildTeamChart(row, teamHelper, chartData, chartPool);
                     break;
                 case MetricType.SPINNER:
-                    cell.setCellFormula(
-                            "ARRAYFORMULA(" +
-                                    "INDEX(" + rangeAddress + ", " +
+                    sheet.setArrayFormula(
+                            "INDEX(" + rangeAddress + ", " +
                                     "MATCH(" +
                                     "MAX(" +
                                     "COUNTIF(" + rangeAddress + ", " + rangeAddress + ")" +
                                     "), " +
                                     "COUNTIF(" + rangeAddress + ", " + rangeAddress + ")" +
-                                    ", 0)))");
+                                    ", 0))",
+                            new CellRangeAddress(cell.getRowIndex(),
+                                                 cell.getRowIndex(),
+                                                 cell.getColumnIndex(),
+                                                 cell.getColumnIndex()));
                     break;
                 case MetricType.HEADER:
                 case MetricType.NOTE:
@@ -440,14 +591,40 @@ public final class SpreadsheetWriter implements OnSuccessListener<Map<TeamHelper
                     break;
             }
         }
+
+        for (Chart chart : chartData.keySet()) {
+            Pair<LineChartData, List<ChartAxis>> data = chartData.get(chart);
+
+            chart.plot(data.first, data.second.toArray(new ChartAxis[data.second.size()]));
+            if (chart instanceof XSSFChart) {
+                XSSFChart xChart = (XSSFChart) chart;
+                CTChart ctChart = xChart.getCTChart();
+
+                CTPlotArea plotArea = ctChart.getPlotArea();
+                setAxisTitle(plotArea.getValAxArray(0).addNewTitle(), "Values");
+                setAxisTitle(plotArea.getCatAxArray(0).addNewTitle(), "Scouts");
+
+                String name = getMetricForChart(chart, chartPool).getName();
+                if (!TextUtils.isEmpty(name)) xChart.setTitle(name);
+            }
+        }
     }
 
-    @MetricType
-    private int getMetricType(TeamHelper teamHelper, String key) {
+    private ScoutMetric<Void> getMetricForChart(Chart chart, Map<ScoutMetric<Void>, Chart> pool) {
+        for (ScoutMetric<Void> metric : pool.keySet()) {
+            if (pool.get(metric) == chart) {
+                return metric;
+            }
+        }
+
+        throw new IllegalStateException("Could not find chart in pool");
+    }
+
+    private ScoutMetric getMetric(TeamHelper teamHelper, String key) {
         for (Scout scout : mScouts.get(teamHelper)) {
             for (ScoutMetric metric : scout.getMetrics()) {
-                if (key.equals(metric.getKey())) {
-                    return metric.getType();
+                if (TextUtils.equals(key, metric.getKey())) {
+                    return metric;
                 }
             }
         }
@@ -457,6 +634,83 @@ public final class SpreadsheetWriter implements OnSuccessListener<Map<TeamHelper
 
     private String getRangeAddress(Cell first, Cell last) {
         return first.getAddress().toString() + ":" + last.getAddress().toString();
+    }
+
+    private void buildTeamChart(Row row,
+                                TeamHelper teamHelper,
+                                Map<Chart, Pair<LineChartData, List<ChartAxis>>> chartData,
+                                Map<ScoutMetric<Void>, Chart> chartPool) {
+        Sheet sheet = row.getSheet();
+        int rowNum = row.getRowNum();
+        int lastDataCellNum = row.getSheet().getRow(0).getLastCellNum() - 2;
+
+        Chart chart = null;
+        Pair<Integer, ScoutMetric<Void>> nearestHeader = null;
+
+        List<Row> rows = getAdjustedList(row.getSheet());
+        for (int i = row.getRowNum(); i >= 0; i--) {
+            ScoutMetric metric = getMetric(teamHelper, getMetricKey(rows.get(i)));
+
+            if (metric.getType() == MetricType.HEADER) {
+                nearestHeader = Pair.create(i, metric);
+
+                Chart cachedChart = chartPool.get(metric);
+                if (cachedChart != null) chart = cachedChart;
+                break;
+            }
+        }
+
+        if (nearestHeader == null) {
+            nearestHeader = Pair.create(0, new ScoutMetric<>(null, null, MetricType.HEADER));
+        }
+
+        LineChartData data;
+        if (chart == null) {
+            Drawing drawing = sheet.createDrawingPatriarch();
+            Integer headerIndex = nearestHeader.first + 1;
+            int startChartIndex = lastDataCellNum + 3;
+            chart = drawing.createChart(
+                    createAnchor(drawing, headerIndex, startChartIndex, startChartIndex + 10));
+
+            LineChartData lineChartData = chart.getChartDataFactory().createLineChartData();
+            data = lineChartData;
+
+            ChartAxis bottomAxis = chart.getChartAxisFactory()
+                    .createCategoryAxis(AxisPosition.BOTTOM);
+            ValueAxis leftAxis = chart.getChartAxisFactory().createValueAxis(AxisPosition.LEFT);
+            leftAxis.setCrosses(AxisCrosses.AUTO_ZERO);
+
+            chartData.put(chart, Pair.create(lineChartData, Arrays.asList(bottomAxis, leftAxis)));
+            chartPool.put(nearestHeader.second, chart);
+
+            ChartLegend legend = chart.getOrCreateLegend();
+            legend.setPosition(LegendPosition.RIGHT);
+        } else {
+            data = chartData.get(chart).first;
+        }
+
+        ChartDataSource<String> categorySource = DataSources.fromStringCellRange(
+                sheet, new CellRangeAddress(0, 0, 1, lastDataCellNum));
+        data.addSeries(
+                categorySource,
+                DataSources.fromNumericCellRange(
+                        sheet,
+                        new CellRangeAddress(rowNum, rowNum, 1, lastDataCellNum)))
+                .setTitle(row.getCell(0).getStringCellValue());
+    }
+
+    private void setAxisTitle(CTTitle title, String text) {
+        title.addNewLayout();
+        title.addNewOverlay().setVal(false);
+
+        CTTextBody textBody = title.addNewTx().addNewRich();
+        textBody.addNewBodyPr();
+        textBody.addNewLstStyle();
+
+        CTTextParagraph paragraph = textBody.addNewP();
+        paragraph.addNewPPr().addNewDefRPr();
+        paragraph.addNewR().setT(text);
+        paragraph.addNewEndParaRPr();
     }
 
     private void setCellFormat(Cell cell, String format) {
@@ -543,7 +797,7 @@ public final class SpreadsheetWriter implements OnSuccessListener<Map<TeamHelper
         anchor.setRow2(row.getRowNum() + 3);
 
         Comment comment = row.getSheet().createDrawingPatriarch().createCellComment(anchor);
-        comment.setAuthor(mContext.getString(R.string.app_name));
+        comment.setAuthor(getString(R.string.app_name));
         return comment;
     }
 
@@ -644,14 +898,12 @@ public final class SpreadsheetWriter implements OnSuccessListener<Map<TeamHelper
 
                 if (TextUtils.isEmpty(getStringForCell(averageCell))) continue;
 
-                Cell metricCell = averageRow.getCell(0);
-                String metricKey = metricCell.getCellComment().getString().toString();
-
+                String metricKey = getMetricKey(averageRow);
                 for (Cell keyCell : getAdjustedList(headerRow)) {
                     Comment keyComment = keyCell.getCellComment();
                     String key = keyComment == null ? null : keyComment.getString().toString();
 
-                    if (metricKey.equals(key)) {
+                    if (TextUtils.equals(metricKey, key)) {
                         setAverageFormula(scoutSheet,
                                           row.createCell(keyCell.getColumnIndex()),
                                           averageCell);
@@ -660,7 +912,7 @@ public final class SpreadsheetWriter implements OnSuccessListener<Map<TeamHelper
                 }
 
                 Cell keyCell = headerRow.createCell(headerRow.getLastCellNum());
-                keyCell.setCellValue(metricCell.getStringCellValue());
+                keyCell.setCellValue(averageRow.getCell(0).getStringCellValue());
                 keyCell.setCellStyle(headerStyle);
                 Comment keyComment = getComment(headerRow, keyCell);
                 mTemporaryCommentCells.add(keyCell);
@@ -672,12 +924,75 @@ public final class SpreadsheetWriter implements OnSuccessListener<Map<TeamHelper
                                   averageCell);
             }
         }
+
+        buildAverageCharts(averageSheet);
+    }
+
+    private void buildAverageCharts(Sheet sheet) {
+        int lastColumn = sheet.getRow(0).getLastCellNum() - 1;
+
+        Drawing drawing = sheet.createDrawingPatriarch();
+        Chart chart = drawing.createChart(
+                createAnchor(drawing, sheet.getLastRowNum() + 3, 1, lastColumn + 1));
+
+        ChartLegend legend = chart.getOrCreateLegend();
+        legend.setPosition(LegendPosition.RIGHT);
+
+        ChartDataSource<String> categorySource = DataSources.fromStringCellRange(
+                sheet, new CellRangeAddress(0, 0, 1, lastColumn));
+
+        ScatterChartData data = chart.getChartDataFactory().createScatterChartData();
+        List<Row> dataRows = getAdjustedList(sheet);
+        for (Row row : dataRows) {
+            data.addSerie(
+                    categorySource,
+                    DataSources.fromNumericCellRange(
+                            sheet,
+                            new CellRangeAddress(row.getRowNum(),
+                                                 row.getRowNum(),
+                                                 1,
+                                                 row.getLastCellNum() - 1)))
+                    .setTitle(row.getCell(0).getStringCellValue());
+        }
+
+        ChartAxis bottomAxis = chart.getChartAxisFactory()
+                .createCategoryAxis(AxisPosition.BOTTOM);
+        ValueAxis leftAxis = chart.getChartAxisFactory().createValueAxis(AxisPosition.LEFT);
+        leftAxis.setCrosses(AxisCrosses.AUTO_ZERO);
+        chart.plot(data, bottomAxis, leftAxis);
+
+        if (chart instanceof XSSFChart) {
+            CTPlotArea plotArea = ((XSSFChart) chart).getCTChart().getPlotArea();
+            setAxisTitle(plotArea.getValAxArray(0).addNewTitle(), "Values");
+            setAxisTitle(plotArea.getCatAxArray(0).addNewTitle(), "Metrics");
+        }
+    }
+
+    private ClientAnchor createAnchor(Drawing drawing,
+                                      int startRow,
+                                      int startColumn,
+                                      int endColumn) {
+        return drawing.createAnchor(
+                0, 0, 0, 0, startColumn, startRow, endColumn, startRow + endColumn / 2);
     }
 
     private void setAverageFormula(Sheet scoutSheet, Cell valueCell, Cell averageCell) {
         String safeSheetName = scoutSheet.getSheetName().replace("'", "''");
-        valueCell.setCellFormula("'" + safeSheetName + "'!" + averageCell.getAddress());
+        String rangeAddress = "'" + safeSheetName + "'!" + averageCell.getAddress();
+
+        valueCell.setCellFormula("IF(" +
+                                         "OR(" + rangeAddress + " = TRUE, " + rangeAddress + " = FALSE), " +
+                                         "IF(" + rangeAddress + " = TRUE, 100, 0), " +
+                                         rangeAddress + ")");
         valueCell.setCellStyle(averageCell.getCellStyle());
+
+        if (averageCell.getCellTypeEnum() == CellType.BOOLEAN) {
+            setCellFormat(valueCell, "0.00%");
+        }
+    }
+
+    private String getMetricKey(Row row) {
+        return row.getCell(0).getCellComment().getString().toString();
     }
 
     private <T> List<T> getAdjustedList(Iterable<T> iterator) {
@@ -688,102 +1003,21 @@ public final class SpreadsheetWriter implements OnSuccessListener<Map<TeamHelper
     }
 
     private boolean isUnsupportedDevice() {
-        return Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP;
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP
+                || UNSUPPORTED_DEVICES.contains(getDeviceModel());
+    }
+
+    private String getDeviceModel() {
+        return (Build.MANUFACTURER.toUpperCase(Locale.ROOT) + "-" + Build.MODEL.toUpperCase(Locale.ROOT))
+                .replace(' ', '-');
     }
 
     private void showError(Exception e) {
         FirebaseCrash.report(e);
-        mProgressDialog.dismiss();
 
-        String message = mContext.getString(R.string.general_error) + "\n\n" + e.getMessage();
-        Toast.makeText(mContext, message, Toast.LENGTH_LONG).show();
-    }
-
-    private void setApacheProperties() {
-        System.setProperty("org.apache.poi.javax.xml.stream.XMLInputFactory",
-                           "com.fasterxml.aalto.stax.InputFactoryImpl");
-        System.setProperty("org.apache.poi.javax.xml.stream.XMLOutputFactory",
-                           "com.fasterxml.aalto.stax.OutputFactoryImpl");
-        System.setProperty("org.apache.poi.javax.xml.stream.XMLEventFactory",
-                           "com.fasterxml.aalto.stax.EventFactoryImpl");
-    }
-
-    private static final class ProgressDialogManager implements Application.ActivityLifecycleCallbacks {
-        private String mMessage;
-
-        private Application mApplication;
-        private WeakReference<ProgressDialog> mProgressDialog;
-
-        private ProgressDialogManager(Activity activity) {
-            mApplication = activity.getApplication();
-            mMessage = activity.getString(R.string.loading_teams);
-
-            mApplication.registerActivityLifecycleCallbacks(this);
-            initProgressDialog(activity);
-        }
-
-        public static ProgressDialogManager show(Activity activity) {
-            return new ProgressDialogManager(activity);
-        }
-
-        public void setMessage(String message) {
-            mMessage = message;
-
-            new Handler(Looper.getMainLooper()).post(new Runnable() {
-                @Override
-                public void run() {
-                    ProgressDialog dialog = mProgressDialog.get();
-                    if (dialog != null) dialog.setMessage(mMessage);
-                }
-            });
-        }
-
-        public void dismiss() {
-            internalDismiss();
-            mApplication.unregisterActivityLifecycleCallbacks(this);
-        }
-
-        private void initProgressDialog(Activity activity) {
-            mProgressDialog = new WeakReference<>(
-                    ProgressDialog.show(activity, "", mMessage, true));
-        }
-
-        private void internalDismiss() {
-            ProgressDialog dialog = mProgressDialog.get();
-            if (dialog != null) {
-                dialog.dismiss();
-                mProgressDialog = new WeakReference<>(null);
-            }
-        }
-
-        @Override
-        public void onActivityCreated(Activity activity, Bundle savedInstanceState) {
-            if (mProgressDialog.get() == null) initProgressDialog(activity);
-        }
-
-        @Override
-        public void onActivityDestroyed(Activity activity) {
-            internalDismiss();
-        }
-
-        @Override
-        public void onActivityStarted(Activity activity) {
-        }
-
-        @Override
-        public void onActivityResumed(Activity activity) {
-        }
-
-        @Override
-        public void onActivityPaused(Activity activity) {
-        }
-
-        @Override
-        public void onActivityStopped(Activity activity) {
-        }
-
-        @Override
-        public void onActivitySaveInstanceState(Activity activity, Bundle outState) {
-        }
+        String message = getString(R.string.general_error) + "\n\n" + e.getMessage();
+        new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(this,
+                                                                      message,
+                                                                      Toast.LENGTH_LONG).show());
     }
 }
