@@ -32,7 +32,7 @@ public class DeleteTeamDialog extends DialogFragment implements AlertDialog.OnCl
     @Override
     public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        for (Parcelable parcelable : TeamHelper.getList(getArguments())) {
+        for (Parcelable parcelable : TeamHelper.parseList(getArguments())) {
             mTeamHelpers.add((TeamHelper) parcelable);
         }
         Collections.sort(mTeamHelpers);
@@ -54,7 +54,7 @@ public class DeleteTeamDialog extends DialogFragment implements AlertDialog.OnCl
                 .setMessage(mTeamHelpers.size() == Constants.SINGLE_ITEM
                                     ? null : getString(R.string.caution_delete, deletedTeams))
                 .setPositiveButton(R.string.delete, this)
-                .setNegativeButton(android.R.string.no, null)
+                .setNegativeButton(android.R.string.cancel, null)
                 .create();
     }
 

@@ -7,11 +7,9 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.ResolveInfo;
 import android.graphics.Paint;
 import android.net.Uri;
 import android.os.Build;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.support.annotation.Nullable;
@@ -39,6 +37,8 @@ import com.supercilex.robotscouter.data.util.Scouts;
 import com.supercilex.robotscouter.data.util.TeamHelper;
 import com.supercilex.robotscouter.util.ConnectivityHelper;
 import com.supercilex.robotscouter.util.Constants;
+import com.supercilex.robotscouter.util.IoHelper;
+import com.supercilex.robotscouter.util.PermissionRequestHandler;
 import com.supercilex.robotscouter.util.PreferencesHelper;
 
 import org.apache.poi.hssf.usermodel.HSSFWorkbook;
@@ -104,14 +104,12 @@ import pub.devrel.easypermissions.EasyPermissions;
 
 import static org.apache.poi.ss.usermodel.Row.MissingCellPolicy;
 
-public final class SpreadsheetExporter extends IntentService implements OnSuccessListener<Map<TeamHelper, List<Scout>>> {
+public class SpreadsheetExporter extends IntentService implements OnSuccessListener<Map<TeamHelper, List<Scout>>> {
     private static final String TAG = "SpreadsheetExporter";
-    public static final List<String> PERMS = Collections.singletonList(Manifest.permission.WRITE_EXTERNAL_STORAGE);
 
     private static final List<String> UNSUPPORTED_DEVICES =
             Collections.unmodifiableList(Arrays.asList("SAMSUNG-SM-N900A"));
 
-    private static final String EXPORT_FOLDER_NAME = "Robot Scouter/";
     private static final String MIME_TYPE_MS_EXCEL = "application/vnd.ms-excel";
     private static final String MIME_TYPE_ALL = "*/*";
     private static final String FILE_EXTENSION = ".xlsx";
@@ -180,25 +178,21 @@ public final class SpreadsheetExporter extends IntentService implements OnSucces
      */
     @SuppressWarnings("MissingPermission")
     public static boolean writeAndShareTeams(Fragment fragment,
+                                             PermissionRequestHandler permHandler,
                                              @Size(min = 1) List<TeamHelper> teamHelpers) {
         if (teamHelpers.isEmpty()) return false;
 
         Context context = fragment.getContext();
 
-        String[] permsArray = PERMS.toArray(new String[PERMS.size()]);
-        if (!EasyPermissions.hasPermissions(context, permsArray)) {
-            EasyPermissions.requestPermissions(
-                    fragment,
-                    fragment.getString(R.string.write_storage_rationale),
-                    8653,
-                    permsArray);
+        if (!EasyPermissions.hasPermissions(context, permHandler.getPermsArray())) {
+            permHandler.requestPerms(R.string.write_storage_rationale_spreadsheet);
             return false;
         }
 
         if (PreferencesHelper.shouldShowExportHint(context)) {
             Snackbar.make(fragment.getView(),
                           R.string.exporting_spreadsheet_hint,
-                          Snackbar.LENGTH_LONG)
+                          Snackbar.LENGTH_INDEFINITE)
                     .setAction(R.string.never_again,
                                v -> PreferencesHelper.setShouldShowExportHint(context, false))
                     .show();
@@ -242,13 +236,10 @@ public final class SpreadsheetExporter extends IntentService implements OnSucces
                         getExportNotification(getString(R.string.exporting_spreadsheet_loading)));
 
         if (ConnectivityHelper.isOffline(this)) {
-            new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(this,
-                                                                          R.string.exporting_offline,
-                                                                          Toast.LENGTH_LONG)
-                    .show());
+            showToast(getString(R.string.exporting_offline));
         }
 
-        List<TeamHelper> teamHelpers = TeamHelper.getList(intent);
+        List<TeamHelper> teamHelpers = TeamHelper.parseList(intent);
         Collections.sort(teamHelpers);
         try {
             Tasks.await(Scouts.getAll(teamHelpers, this)); // Force a refresh
@@ -284,9 +275,7 @@ public final class SpreadsheetExporter extends IntentService implements OnSucces
             sharingIntent.setAction(Intent.ACTION_VIEW)
                     .setDataAndType(spreadsheetUri, MIME_TYPE_MS_EXCEL);
 
-            List<ResolveInfo> supportedActivities =
-                    getPackageManager().queryIntentActivities(sharingIntent, 0);
-            if (supportedActivities.isEmpty()) {
+            if (sharingIntent.resolveActivity(getPackageManager()) == null) {
                 sharingIntent.setDataAndType(spreadsheetUri, MIME_TYPE_ALL);
             }
         }
@@ -319,40 +308,39 @@ public final class SpreadsheetExporter extends IntentService implements OnSucces
 
     @Nullable
     private Uri getFileUri() {
-        if (!isExternalStorageWritable()) return null;
-        String pathname =
-                Environment.getExternalStorageDirectory().toString() + "/" + EXPORT_FOLDER_NAME;
-        File robotScouterFolder = new File(pathname);
-        if (!robotScouterFolder.exists() && !robotScouterFolder.mkdirs()) return null;
+        @SuppressWarnings("MissingPermission")
+        File rsFolder = IoHelper.getRootFolder();
+        if (rsFolder == null) return null;
 
-        File file = writeFile(robotScouterFolder);
+        File file = writeFile(rsFolder);
         return file == null ? null : Uri.fromFile(file);
     }
 
-    private boolean isExternalStorageWritable() {
-        return Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED);
-    }
-
     @Nullable
-    private File writeFile(File robotScouterFolder) {
+    private File writeFile(File rsFolder) {
         FileOutputStream stream = null;
-        File absoluteFile = new File(robotScouterFolder, getFullyQualifiedFileName(null));
+        File absoluteFile = new File(rsFolder, getFullyQualifiedFileName(null));
         try {
             for (int i = 1; true; i++) {
-                if (absoluteFile.createNewFile()) {
+                if (absoluteFile.exists()) {
+                    absoluteFile = new File(
+                            rsFolder, getFullyQualifiedFileName(" (" + i + ")"));
+                } else {
+                    absoluteFile = new File(absoluteFile.getParentFile(),
+                                            IoHelper.hide(absoluteFile.getName()));
+                    if (!absoluteFile.createNewFile()) {
+                        throw new IOException("Failed to create file");
+                    }
                     break;
-                } else { // File already exists
-                    absoluteFile = new File(robotScouterFolder,
-                                            getFullyQualifiedFileName(" (" + i + ")"));
                 }
             }
 
             stream = new FileOutputStream(absoluteFile);
             getWorkbook().write(stream);
 
-            return absoluteFile;
+            return IoHelper.unhide(absoluteFile);
         } catch (IOException e) {
-            new Handler(Looper.getMainLooper()).post(() -> showError(e));
+            showError(e);
             absoluteFile.delete();
         } finally {
             if (stream != null) try {
@@ -403,10 +391,7 @@ public final class SpreadsheetExporter extends IntentService implements OnSucces
         Workbook workbook;
         if (isUnsupportedDevice()) {
             workbook = new HSSFWorkbook();
-            new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(this,
-                                                                          R.string.unsupported_device,
-                                                                          Toast.LENGTH_SHORT)
-                    .show());
+            showToast(getString(R.string.unsupported_device));
         } else {
             workbook = new XSSFWorkbook();
         }
@@ -604,7 +589,7 @@ public final class SpreadsheetExporter extends IntentService implements OnSucces
                 setAxisTitle(plotArea.getValAxArray(0).addNewTitle(), "Values");
                 setAxisTitle(plotArea.getCatAxArray(0).addNewTitle(), "Scouts");
 
-                String name = getMetricForChart(chart, chartPool).getName();
+                String name = getMetricForChart(xChart, chartPool).getName();
                 if (!TextUtils.isEmpty(name)) xChart.setTitle(name);
             }
         }
@@ -640,6 +625,8 @@ public final class SpreadsheetExporter extends IntentService implements OnSucces
                                 TeamHelper teamHelper,
                                 Map<Chart, Pair<LineChartData, List<ChartAxis>>> chartData,
                                 Map<ScoutMetric<Void>, Chart> chartPool) {
+        if (isUnsupportedDevice()) return;
+
         Sheet sheet = row.getSheet();
         int rowNum = row.getRowNum();
         int lastDataCellNum = row.getSheet().getRow(0).getLastCellNum() - 2;
@@ -660,7 +647,19 @@ public final class SpreadsheetExporter extends IntentService implements OnSucces
             }
         }
 
+        chartFinder:
         if (nearestHeader == null) {
+            for (Chart possibleChart : chartData.keySet()) {
+                if (possibleChart instanceof XSSFChart) {
+                    XSSFChart xChart = (XSSFChart) possibleChart;
+                    if (xChart.getGraphicFrame().getAnchor().getRow1() == Constants.SINGLE_ITEM) {
+                        nearestHeader = Pair.create(0, getMetricForChart(xChart, chartPool));
+                        chart = xChart;
+                        break chartFinder;
+                    }
+                }
+            }
+
             nearestHeader = Pair.create(0, new ScoutMetric<>(null, null, MetricType.HEADER));
         }
 
@@ -670,7 +669,10 @@ public final class SpreadsheetExporter extends IntentService implements OnSucces
             Integer headerIndex = nearestHeader.first + 1;
             int startChartIndex = lastDataCellNum + 3;
             chart = drawing.createChart(
-                    createAnchor(drawing, headerIndex, startChartIndex, startChartIndex + 10));
+                    createAnchor(drawing,
+                                 getRowIndex(headerIndex, new ArrayList<>(chartData.keySet())),
+                                 startChartIndex,
+                                 startChartIndex + 10));
 
             LineChartData lineChartData = chart.getChartDataFactory().createLineChartData();
             data = lineChartData;
@@ -680,11 +682,11 @@ public final class SpreadsheetExporter extends IntentService implements OnSucces
             ValueAxis leftAxis = chart.getChartAxisFactory().createValueAxis(AxisPosition.LEFT);
             leftAxis.setCrosses(AxisCrosses.AUTO_ZERO);
 
-            chartData.put(chart, Pair.create(lineChartData, Arrays.asList(bottomAxis, leftAxis)));
-            chartPool.put(nearestHeader.second, chart);
-
             ChartLegend legend = chart.getOrCreateLegend();
             legend.setPosition(LegendPosition.RIGHT);
+
+            chartData.put(chart, Pair.create(lineChartData, Arrays.asList(bottomAxis, leftAxis)));
+            chartPool.put(nearestHeader.second, chart);
         } else {
             data = chartData.get(chart).first;
         }
@@ -697,6 +699,30 @@ public final class SpreadsheetExporter extends IntentService implements OnSucces
                         sheet,
                         new CellRangeAddress(rowNum, rowNum, 1, lastDataCellNum)))
                 .setTitle(row.getCell(0).getStringCellValue());
+    }
+
+    private int getRowIndex(int defaultIndex, List<Chart> charts) {
+        if (charts.isEmpty()) return defaultIndex;
+
+        List<ClientAnchor> anchors = new ArrayList<>();
+        for (Chart chart : charts) {
+            if (chart instanceof XSSFChart) {
+                XSSFChart xChart = (XSSFChart) chart;
+                anchors.add(xChart.getGraphicFrame().getAnchor());
+            } else {
+                return defaultIndex;
+            }
+        }
+
+        Collections.sort(anchors, (o1, o2) -> {
+            int endRow1 = o1.getRow2();
+            int endRow2 = o2.getRow2();
+
+            return endRow1 == endRow2 ? 0 : endRow1 > endRow2 ? 1 : -1;
+        });
+
+        int lastRow = anchors.get(anchors.size() - 1).getRow2();
+        return defaultIndex > lastRow ? defaultIndex : lastRow;
     }
 
     private void setAxisTitle(CTTitle title, String text) {
@@ -929,6 +955,8 @@ public final class SpreadsheetExporter extends IntentService implements OnSucces
     }
 
     private void buildAverageCharts(Sheet sheet) {
+        if (isUnsupportedDevice()) return;
+
         int lastColumn = sheet.getRow(0).getLastCellNum() - 1;
 
         Drawing drawing = sheet.createDrawingPatriarch();
@@ -1016,8 +1044,11 @@ public final class SpreadsheetExporter extends IntentService implements OnSucces
         FirebaseCrash.report(e);
 
         String message = getString(R.string.general_error) + "\n\n" + e.getMessage();
-        new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(this,
-                                                                      message,
-                                                                      Toast.LENGTH_LONG).show());
+        showToast(message);
+    }
+
+    private void showToast(String message) {
+        new Handler(Looper.getMainLooper()).post(
+                () -> Toast.makeText(this, message, Toast.LENGTH_LONG).show());
     }
 }
