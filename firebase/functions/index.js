@@ -51,7 +51,7 @@ function mergeTeams(duplicates) {
             return snap.val();
         }),
         admin.database().ref(teamRef + duplicates.teamKey2).once('value', (snap) => {
-            return snap.val()
+            return snap.val();
         })
     ]).then(values => {
         console.log(values);
