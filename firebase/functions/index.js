@@ -8,11 +8,9 @@ admin.initializeApp(functions.config().firebase);
 const root = '/debug';
 
 exports.mergeTeams = functions.database.ref(root + '/team-indices/{uid}').onWrite(event => {
-    const duplicates = findDuplicates(event);
-    console.log("Duplicates: " + duplicates);
-    if (duplicates.hasDuplicates) {
-        return mergeTeams(duplicates);
-    }
+    const duplicates = JSON.parse(findDuplicates(event));
+    console.log(duplicates);
+    if (duplicates.hasDuplicates) return mergeTeams(duplicates);
 });
 
 function findDuplicates(event) {
@@ -56,18 +54,27 @@ function mergeTeams(duplicates) {
             return snap.val()
         })
     ]).then(values => {
-        console.log("Teams: " + values);
+        console.log(values);
 
-        const teamKey1 = values[0];
-        const teamKey2 = values[1];
+        const team1 = values[0];
+        const team2 = values[1];
+        console.log(team1); // TODO remove
+        console.log(team2);
 
-        removeExtraneousValues(teamKey1);
-        removeExtraneousValues(teamKey2);
-        console.log("First team: " + teamKey1);
-        console.log("Second team: " + teamKey2);
+        const oldestTeam = team1.timestamp < team2.timestamp ? team1 : team2;
+        const duplicateTeam = oldestTeam === team1 ? team2 : team1;
+        console.log(oldestTeam);
+        console.log(duplicateTeam);
+
+        removeExtraneousValues(oldestTeam);
+        removeExtraneousValues(duplicateTeam);
+
+        console.log("Removed extraneous values");
+        console.log(oldestTeam);
+        console.log(duplicateTeam);
     });
 }
 
-function removeExtraneousValues(oldestTeam) {
-    oldestTeam.timestamp = 0;
+function removeExtraneousValues(team) {
+    team.timestamp = 0;
 }
