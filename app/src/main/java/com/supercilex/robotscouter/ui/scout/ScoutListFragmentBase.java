@@ -31,7 +31,7 @@ import com.supercilex.robotscouter.data.util.TeamHelper;
 import com.supercilex.robotscouter.ui.ShouldUploadMediaToTbaDialog;
 import com.supercilex.robotscouter.ui.TeamDetailsDialog;
 import com.supercilex.robotscouter.ui.TeamMediaCreator;
-import com.supercilex.robotscouter.ui.TeamSender;
+import com.supercilex.robotscouter.ui.TeamSharer;
 import com.supercilex.robotscouter.ui.scout.template.ScoutTemplateSheet;
 import com.supercilex.robotscouter.util.AnalyticsHelper;
 import com.supercilex.robotscouter.util.ConnectivityHelper;
@@ -47,7 +47,7 @@ public abstract class ScoutListFragmentBase extends Fragment
     protected AppBarViewHolderBase mHolder;
     private ScoutPagerAdapter mPagerAdapter;
 
-    private TaskCompletionSource<Void> mOnScoutingReadyTask = new TaskCompletionSource<>();
+    private TaskCompletionSource<Void> mOnScoutingReadyTask;
     private Bundle mSavedState;
 
     protected static ScoutListFragmentBase setArgs(TeamHelper teamHelper,
@@ -64,6 +64,7 @@ public abstract class ScoutListFragmentBase extends Fragment
     public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         mTeamHelper = TeamHelper.parse(getArguments());
+        mOnScoutingReadyTask = new TaskCompletionSource<>();
 
         FirebaseAuth.getInstance().addAuthStateListener(this);
     }
@@ -159,7 +160,7 @@ public abstract class ScoutListFragmentBase extends Fragment
                 ShouldUploadMediaToTbaDialog.show(this);
                 break;
             case R.id.action_share:
-                TeamSender.launchInvitationIntent(getActivity(),
+                TeamSharer.launchInvitationIntent(getActivity(),
                                                   Collections.singletonList(mTeamHelper));
                 AnalyticsHelper.shareTeam(teamNumber);
                 break;
@@ -201,10 +202,7 @@ public abstract class ScoutListFragmentBase extends Fragment
             mTeamHelper.addTeam();
             addListeners();
             TbaDownloader.load(mTeamHelper.getTeam(), getContext())
-                    .addOnSuccessListener(team -> mTeamHelper.updateTeam(team))
-                    .addOnFailureListener(getActivity(),
-                                          e -> DownloadTeamDataJob.start(getActivity(),
-                                                                         mTeamHelper));
+                    .addOnSuccessListener(team -> mTeamHelper.updateTeam(team));
         } else {
             Constants.sFirebaseTeams.addChangeEventListener(this);
         }

@@ -32,12 +32,21 @@
     <string name="multiple_teams_selected">Multiple teams selected</string>
 
     <string name="share">Share</string>
-    <string name="share_title">Share team %s</string>
-    <string name="share_message">Edit team %s with me!</string>
-    <string name="share_call_to_action">Import team %s into Robot Scouter</string>
+    <plurals name="share_title">
+        <item quantity="one">Share team %s</item>
+        <item quantity="other">Share teams %s</item>
+    </plurals>
+    <plurals name="share_message">
+        <item quantity="one">You were invited to edit team %s with me in Robot Scouter!</item>
+        <item quantity="other">You were invited to edit teams %s with me in Robot Scouter!</item>
+    </plurals>
+    <plurals name="share_call_to_action">
+        <item quantity="one">Import team %s into Robot Scouter</item>
+        <item quantity="other">Import teams %s into Robot Scouter</item>
+    </plurals>
 
     <!-- Spreadsheet exporting -->
-    <string name="export_spreadsheet">Export to spreadsheet</string>
+    <string name="export_spreadsheet">Export spreadsheet</string>
     <plurals name="share_spreadsheet_title">
         <item quantity="one">Share team %s’s scouting data</item>
         <item quantity="other">Share teams %s’s scouting data</item>
@@ -45,14 +54,20 @@
     <string name="write_storage_rationale_spreadsheet">Robot Scouter needs access to your storage to create the XLSX file.</string>
     <string name="never_again">Don’t show again</string>
     <string name="exporting_spreadsheet_hint">Export started; view progress in the notification drawer.</string>
-    <plurals name="exporting_spreadsheet_complete_title">
-        <item quantity="one">Spreadsheet exporting complete for team %s</item>
-        <item quantity="other">Spreadsheet exporting complete for teams %s</item>
+    <string name="exporting_spreadsheet_complete_title">Spreadsheet exporting complete</string>
+    <plurals name="exporting_spreadsheet_complete_summary">
+        <item quantity="one">1 team exported</item>
+        <item quantity="other">%d teams exported</item>
+    </plurals>
+    <plurals name="exporting_spreadsheet_complete_message">
+        <item quantity="one">Exported team %s.</item>
+        <item quantity="other">Exported teams %s.</item>
     </plurals>
     <string name="exporting_spreadsheet_title">Exporting spreadsheet</string>
     <string name="exporting_spreadsheet_loading">Loading teams</string>
     <string name="exporting_spreadsheet_team">Exporting team %s’s sheet</string>
     <string name="exporting_spreadsheet_average">Exporting average sheet</string>
+    <string name="exporting_spreadsheet_cleanup">Cleanup</string>
     <string name="exporting_offline">Exporting spreadsheet while offline may yield incomplete results.</string>
 
     <string name="sign_in">Sign in</string>

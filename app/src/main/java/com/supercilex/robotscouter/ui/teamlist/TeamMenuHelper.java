@@ -24,12 +24,12 @@ import android.view.View;
 import com.firebase.ui.database.FirebaseRecyclerAdapter;
 import com.google.android.gms.tasks.OnSuccessListener;
 import com.supercilex.robotscouter.R;
-import com.supercilex.robotscouter.data.client.SpreadsheetExporter;
+import com.supercilex.robotscouter.data.client.spreadsheet.SpreadsheetExporter;
 import com.supercilex.robotscouter.data.model.Team;
 import com.supercilex.robotscouter.data.util.TeamHelper;
 import com.supercilex.robotscouter.ui.AuthHelper;
 import com.supercilex.robotscouter.ui.TeamDetailsDialog;
-import com.supercilex.robotscouter.ui.TeamSender;
+import com.supercilex.robotscouter.ui.TeamSharer;
 import com.supercilex.robotscouter.util.AnalyticsHelper;
 import com.supercilex.robotscouter.util.Constants;
 import com.supercilex.robotscouter.util.IoHelper;
@@ -42,6 +42,11 @@ public class TeamMenuHelper implements TeamMenuManager, OnSuccessListener<Void>,
     private static final String SELECTED_TEAMS_KEY = "selected_teams_key";
     private static final int ANIMATION_DURATION = 250;
 
+    private final Fragment mFragment;
+    private final PermissionRequestHandler mPermHandler;
+
+    private final List<TeamHelper> mSelectedTeams = new ArrayList<>();
+
     /**
      * Do not use.
      * <p>
@@ -51,15 +56,9 @@ public class TeamMenuHelper implements TeamMenuManager, OnSuccessListener<Void>,
      * @see #getFab()
      */
     private FloatingActionButton mFab;
-
-    private Fragment mFragment;
     private RecyclerView mRecyclerView;
-    private Menu mMenu;
-
-    private List<TeamHelper> mSelectedTeams = new ArrayList<>();
     private FirebaseRecyclerAdapter<Team, TeamViewHolder> mAdapter;
-
-    private PermissionRequestHandler mPermHandler;
+    private Menu mMenu;
 
     public TeamMenuHelper(Fragment fragment) {
         mFragment = fragment;
@@ -82,6 +81,10 @@ public class TeamMenuHelper implements TeamMenuManager, OnSuccessListener<Void>,
     public void onCreateOptionsMenu(Menu menu) {
         mMenu = menu;
 
+        mMenu.add(Menu.NONE, R.id.action_export_spreadsheet, Menu.NONE, R.string.export_spreadsheet)
+                .setVisible(false)
+                .setIcon(R.drawable.ic_import_export_white_24dp)
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM);
         mMenu.add(Menu.NONE, R.id.action_share, Menu.NONE, R.string.share)
                 .setVisible(false)
                 .setIcon(R.drawable.ic_share_white_24dp)
@@ -97,10 +100,6 @@ public class TeamMenuHelper implements TeamMenuManager, OnSuccessListener<Void>,
         mMenu.add(Menu.NONE, R.id.action_edit_team_details, Menu.NONE, R.string.edit_team_details)
                 .setVisible(false)
                 .setIcon(R.drawable.ic_mode_edit_white_24dp)
-                .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM);
-        mMenu.add(Menu.NONE, R.id.action_export_spreadsheet, Menu.NONE, R.string.export_spreadsheet)
-                .setVisible(false)
-                .setIcon(R.drawable.ic_import_export_white_24dp)
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM);
         mMenu.add(Menu.NONE, R.id.action_delete, Menu.NONE, R.string.delete)
                 .setVisible(false)
@@ -125,7 +124,7 @@ public class TeamMenuHelper implements TeamMenuManager, OnSuccessListener<Void>,
         TeamHelper teamHelper = mSelectedTeams.get(0);
         switch (item.getItemId()) {
             case R.id.action_share:
-                if (TeamSender.launchInvitationIntent(mFragment.getActivity(), mSelectedTeams)) {
+                if (TeamSharer.launchInvitationIntent(mFragment.getActivity(), mSelectedTeams)) {
                     resetMenu();
                 }
                 AnalyticsHelper.shareTeam(teamHelper.getTeam().getNumber());

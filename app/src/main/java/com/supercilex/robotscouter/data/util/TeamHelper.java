@@ -27,6 +27,7 @@ import com.supercilex.robotscouter.util.RemoteConfigHelper;
 
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -83,6 +84,35 @@ public class TeamHelper implements Parcelable, Comparable<TeamHelper> {
         return args;
     }
 
+    public static String getTeamNames(List<TeamHelper> teamHelpers) {
+        List<TeamHelper> sortedTeamHelpers = new ArrayList<>(teamHelpers);
+        Collections.sort(sortedTeamHelpers);
+
+        String teamName;
+
+        if (sortedTeamHelpers.size() == Constants.SINGLE_ITEM) {
+            teamName = sortedTeamHelpers.get(0).toString();
+        } else if (sortedTeamHelpers.size() == Constants.TWO_ITEMS) {
+            teamName = sortedTeamHelpers.get(0) + " and " + sortedTeamHelpers.get(1);
+        } else {
+            boolean teamsMaxedOut = sortedTeamHelpers.size() > 10;
+            int size = teamsMaxedOut ? 10 : sortedTeamHelpers.size();
+
+            StringBuilder names = new StringBuilder(4 * size);
+            for (int i = 0; i < size; i++) {
+                names.append(sortedTeamHelpers.get(i).getTeam().getNumber());
+                if (i < size - 1) names.append(", ");
+                if (i == size - 2 && !teamsMaxedOut) names.append("and ");
+            }
+
+            if (teamsMaxedOut) names.append(" and more");
+
+            teamName = names.toString();
+        }
+
+        return teamName;
+    }
+
     public Intent toIntent() {
         return new Intent().putExtra(TEAM_HELPER_KEY, this);
     }
@@ -111,7 +141,7 @@ public class TeamHelper implements Parcelable, Comparable<TeamHelper> {
             mTeam.setTemplateKey(Constants.sFirebaseScoutTemplates.get(0).getKey());
         }
         forceUpdateTeam();
-        getRef().child(Constants.FIREBASE_TIMESTAMP).removeValue();
+        forceRefresh();
 
         FirebaseUserActions.getInstance()
                 .end(new Action.Builder(Action.Builder.ADD_ACTION)
@@ -156,6 +186,10 @@ public class TeamHelper implements Parcelable, Comparable<TeamHelper> {
     public void forceUpdateTeam() {
         getRef().setValue(mTeam);
         FirebaseAppIndex.getInstance().update(getIndexable());
+    }
+
+    public void forceRefresh() {
+        getRef().child(Constants.FIREBASE_TIMESTAMP).removeValue();
     }
 
     public void copyMediaInfo(TeamHelper newHelper) {
